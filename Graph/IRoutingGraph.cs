@@ -21,6 +21,8 @@ public interface IRoutingGraph
 
     bool TryGetSyntheticTurnControl(int from, int to, out Vec3 control);
 
+    bool TryGetSyntheticTurnAbsAngle(int from, int to, out float absDegrees);
+
     bool IsForwardEdgeAllowed(int incoming, int at, int next);
 
     float GetForwardTravelCost(int from, int to, int incomingFrom);

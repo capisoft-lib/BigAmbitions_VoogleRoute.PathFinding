@@ -18,6 +18,8 @@ public static class CsvRouteGraphLoader
         var uturns = new HashSet<long>();
         var syntheticTurns = new List<ParallelLaneTurnExpander.TurnEdge>();
         var turnControls = new Dictionary<long, Vec3>();
+        var edgeLengths = new Dictionary<long, float>();
+        var syntheticTurnAngles = new Dictionary<long, float>();
 
         using var reader = new StreamReader(csvPath);
         var header = reader.ReadLine();
@@ -52,7 +54,7 @@ public static class CsvRouteGraphLoader
             else if (edgeType == "synthetic_turn")
             {
                 var maneuver = cols[2];
-                if (maneuver is not ("left" or "uturn"))
+                if (maneuver is not ("left" or "uturn" or "straight"))
                     continue;
 
                 if (!TryParseInt(cols[3], out var from) || !TryParseInt(cols[10], out var to))
@@ -72,12 +74,30 @@ public static class CsvRouteGraphLoader
                     TryParseFloat(cols[19], out var cz))
                     control = new Vec3(cx, cy, cz);
 
+                var edgeKey = RouteGraph.EdgeKey(from, to);
                 syntheticTurns.Add(new ParallelLaneTurnExpander.TurnEdge(from, to, control));
                 AddEdge(forward, from, to);
-                turnControls[RouteGraph.EdgeKey(from, to)] = control;
+                turnControls[edgeKey] = control;
+
+                if (cols.Length > 23 &&
+                    TryParseFloat(cols[23], out var arcLength) &&
+                    arcLength > 0f)
+                {
+                    edgeLengths[edgeKey] = arcLength;
+                }
+                else
+                {
+                    edgeLengths[edgeKey] = ManeuverGeometry.SyntheticTurnTravelMeters(
+                        new Vec3(fx, 0, fz),
+                        new Vec3(tx, 0, tz),
+                        control);
+                }
+
+                if (TryParseFloat(cols[20], out var angleDegrees))
+                    syntheticTurnAngles[edgeKey] = MathF.Abs(angleDegrees);
 
                 if (maneuver == "uturn")
-                    uturns.Add(RouteGraph.EdgeKey(from, to));
+                    uturns.Add(edgeKey);
             }
         }
 
@@ -137,7 +157,12 @@ public static class CsvRouteGraphLoader
         var laneChangeArray = CsvLaneChangeBuilder.BuildLaneChangeEdges(
             posArray, forwardArray, otherLanes, junctionZone, approachZone);
         var routingIndex = RoutingIndex.Build(
-            posArray, forwardArray, reverseArray, junctionZone, turnControls, laneChangeArray);
+            posArray,
+            forwardArray,
+            turnControls,
+            laneChangeArray,
+            edgeLengths,
+            junctionZone);
 
         var xs = positions.Values.Select(p => p.X).ToArray();
         var zs = positions.Values.Select(p => p.Z).ToArray();
@@ -153,6 +178,7 @@ public static class CsvRouteGraphLoader
             routingIndex,
             otherLanes,
             turnControls,
+            syntheticTurnAngles,
             validIndices,
             xs.Min(),
             xs.Max(),

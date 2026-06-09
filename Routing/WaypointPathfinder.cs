@@ -24,10 +24,10 @@ public static class WaypointPathfinder
     public static RouteCompareResult CompareRouteModes(IRoutingGraph graph, RouteQuery query)
     {
         if (!TryFindBestRoute(graph, query, out var withPenalties))
-            return new RouteCompareResult { Error = "Aucun chemin trouvé avec les pénalités du mod." };
+            return new RouteCompareResult { Error = "Aucun chemin trouvé avec les pénalités de virage." };
 
         RouteResult? withoutPenalties = null;
-        if (TryAStar(graph, withPenalties.StartWaypoint, withPenalties.EndWaypoint, useTurnPenalties: false,
+        if (TryAStar(graph, withPenalties.StartWaypoint, withPenalties.EndWaypoint, useGraphTravelCost: false,
                 out var flatPath, out var explored))
         {
             var turns = TurnAnalyzer.AnalyzePath(graph, flatPath);
@@ -140,7 +140,7 @@ public static class WaypointPathfinder
             for (var ei = 0; ei < endCount; ei++)
             {
                 var endIdx = endBuf[ei];
-                if (!TryAStar(graph, startIdx, endIdx, useTurnPenalties: true, out var path, out var nodeCount))
+                if (!TryAStar(graph, startIdx, endIdx, out var path, out var nodeCount))
                     continue;
 
                 explored = Math.Max(explored, nodeCount);
@@ -207,7 +207,11 @@ public static class WaypointPathfinder
     }
 
     private static bool TryAStar(
-        IRoutingGraph graph, int start, int goal, bool useTurnPenalties, out List<int> path, out int explored)
+        IRoutingGraph graph, int start, int goal, out List<int> path, out int explored) =>
+        TryAStar(graph, start, goal, useGraphTravelCost: true, out path, out explored);
+
+    private static bool TryAStar(
+        IRoutingGraph graph, int start, int goal, bool useGraphTravelCost, out List<int> path, out int explored)
     {
         path = new List<int>();
         explored = 0;
@@ -235,9 +239,9 @@ public static class WaypointPathfinder
             var incoming = cameFrom.TryGetValue(current, out var prev) ? prev : -1;
             var gCurrent = gScore.TryGetValue(current, out var gc) ? gc : float.MaxValue;
 
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useTurnPenalties, graph.GetForwardNeighbors(current),
+            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, graph.GetForwardNeighbors(current),
                 closed, open, openSet, cameFrom, gScore, fScore);
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useTurnPenalties, graph.GetLaneChangeNeighbors(current),
+            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, graph.GetLaneChangeNeighbors(current),
                 closed, open, openSet, cameFrom, gScore, fScore);
         }
 
@@ -250,7 +254,7 @@ public static class WaypointPathfinder
         int incoming,
         float gCurrent,
         int goal,
-        bool useTurnPenalties,
+        bool useGraphTravelCost,
         ReadOnlySpan<int> neighbors,
         HashSet<int> closed,
         List<int> open,
@@ -267,7 +271,7 @@ public static class WaypointPathfinder
             if (!graph.IsForwardEdgeAllowed(incoming, current, next))
                 continue;
 
-            var step = useTurnPenalties
+            var step = useGraphTravelCost
                 ? graph.GetForwardTravelCost(current, next, incoming)
                 : graph.FlatDistance(graph.GetPosition(current), graph.GetPosition(next));
             var tentative = gCurrent + step;

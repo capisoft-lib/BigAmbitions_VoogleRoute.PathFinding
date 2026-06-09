@@ -4,7 +4,7 @@ using VoogleRoute.Pathfinding.Routing;
 namespace VoogleRoute.Pathfinding.Graph;
 
 /// <summary>
-/// Graphe routier prétraité : segments (longueur), intersections, pénalités de virage.
+/// Graphe routier prétraité : coûts de segment (longueur / arc CSV, facteur vitesse) et pénalités de virage.
 /// Port fidèle de TrafficRoutingIndex.cs du mod VoogleRoute.
 /// </summary>
 internal sealed class RoutingIndex
@@ -17,6 +17,7 @@ internal sealed class RoutingIndex
     private readonly int[][] _laneChangeNeighbors;
     private readonly float[][] _forwardCosts;
     private readonly float[][] _laneChangeCosts;
+    private readonly IReadOnlyDictionary<long, float>? _edgeLengths;
     private readonly bool[] _intersectionNode;
 
     private RoutingIndex(
@@ -25,6 +26,7 @@ internal sealed class RoutingIndex
         int[][] laneChangeNeighbors,
         float[][] forwardCosts,
         float[][] laneChangeCosts,
+        IReadOnlyDictionary<long, float>? edgeLengths,
         bool[] intersectionNode)
     {
         _positions = positions;
@@ -32,22 +34,30 @@ internal sealed class RoutingIndex
         _laneChangeNeighbors = laneChangeNeighbors;
         _forwardCosts = forwardCosts;
         _laneChangeCosts = laneChangeCosts;
+        _edgeLengths = edgeLengths;
         _intersectionNode = intersectionNode;
     }
 
     internal static RoutingIndex Build(
         Vec3[] positions,
         int[][] forwardEdges,
-        int[][] reverseEdges,
-        bool[] junctionZone,
         IReadOnlyDictionary<long, Vec3>? turnControls = null,
-        int[][]? laneChangeEdges = null)
+        int[][]? laneChangeEdges = null,
+        IReadOnlyDictionary<long, float>? edgeLengths = null,
+        bool[]? intersectionNode = null)
     {
-        var intersectionNode = BuildIntersectionNodes(forwardEdges, reverseEdges, junctionZone);
-        var forwardCosts = BuildEdgeCosts(positions, forwardEdges, turnControls);
+        var forwardCosts = BuildEdgeCosts(positions, forwardEdges, turnControls, edgeLengths);
         var laneChanges = laneChangeEdges ?? CreateEmptyNeighbors(forwardEdges.Length);
         var laneChangeCosts = BuildLaneChangeCosts(positions, laneChanges);
-        return new RoutingIndex(positions, forwardEdges, laneChanges, forwardCosts, laneChangeCosts, intersectionNode);
+        var intersections = intersectionNode ?? new bool[forwardEdges.Length];
+        return new RoutingIndex(
+            positions,
+            forwardEdges,
+            laneChanges,
+            forwardCosts,
+            laneChangeCosts,
+            edgeLengths,
+            intersections);
     }
 
     internal float GetForwardTravelCost(int from, int to, int incomingFrom)
@@ -98,40 +108,11 @@ internal sealed class RoutingIndex
         return neighbors;
     }
 
-    private static bool[] BuildIntersectionNodes(
-        int[][] forwardEdges,
-        int[][] reverseEdges,
-        bool[]? junctionZone)
-    {
-        var size = forwardEdges.Length;
-        var nodes = new bool[size];
-        for (var i = 0; i < size; i++)
-        {
-            if (junctionZone != null && i < junctionZone.Length && junctionZone[i])
-            {
-                nodes[i] = true;
-                continue;
-            }
-
-            var fwd = forwardEdges[i];
-            var rev = reverseEdges[i];
-            if (fwd is { Length: >= 2 })
-            {
-                nodes[i] = true;
-                continue;
-            }
-
-            if (rev is { Length: >= 2 })
-                nodes[i] = true;
-        }
-
-        return nodes;
-    }
-
     private static float[][] BuildEdgeCosts(
         Vec3[] positions,
         int[][] neighbors,
-        IReadOnlyDictionary<long, Vec3>? turnControls)
+        IReadOnlyDictionary<long, Vec3>? turnControls,
+        IReadOnlyDictionary<long, float>? edgeLengths)
     {
         var size = neighbors.Length;
         var costs = new float[size][];
@@ -146,7 +127,7 @@ internal sealed class RoutingIndex
 
             var row = new float[next.Length];
             for (var i = 0; i < next.Length; i++)
-                row[i] = ComputeSegmentCost(positions, from, next[i], turnControls);
+                row[i] = ComputeSegmentCost(positions, from, next[i], turnControls, edgeLengths);
 
             costs[from] = row;
         }
@@ -181,11 +162,16 @@ internal sealed class RoutingIndex
         Vec3[] positions,
         int from,
         int to,
-        IReadOnlyDictionary<long, Vec3>? turnControls)
+        IReadOnlyDictionary<long, Vec3>? turnControls,
+        IReadOnlyDictionary<long, float>? edgeLengths)
     {
+        var key = RouteGraph.EdgeKey(from, to);
         float length;
-        if (turnControls != null &&
-            turnControls.TryGetValue(RouteGraph.EdgeKey(from, to), out var control))
+        if (edgeLengths != null && edgeLengths.TryGetValue(key, out var csvLength) && csvLength > 0f)
+        {
+            length = csvLength;
+        }
+        else if (turnControls != null && turnControls.TryGetValue(key, out var control))
         {
             length = ManeuverGeometry.SyntheticTurnTravelMeters(positions[from], positions[to], control);
         }
@@ -230,11 +216,10 @@ internal sealed class RoutingIndex
 
     private float GetTurnPenalty(int incoming, int at, int to)
     {
-        if (!_intersectionNode[at])
+        if (at < 0 || at >= _intersectionNode.Length || !_intersectionNode[at])
             return 0f;
 
         var abs = TurnGeometry.AbsLaneTurnDegrees(_positions, _forwardNeighbors, incoming, at, to);
-
         return TurnPenalties.PenaltyMeters(abs);
     }
 }

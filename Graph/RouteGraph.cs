@@ -16,6 +16,7 @@ public sealed class RouteGraph : IRoutingGraph
     private readonly bool[] _intersectionNode;
     private readonly RoutingIndex _routingIndex;
     private readonly Dictionary<long, Vec3> _turnControls;
+    private readonly Dictionary<long, float> _syntheticTurnAngles;
     private readonly int[] _validIndices;
 
     public int Size => _positions.Length;
@@ -31,6 +32,7 @@ public sealed class RouteGraph : IRoutingGraph
         RoutingIndex routingIndex,
         int[][] otherLanes,
         IReadOnlyDictionary<long, Vec3> turnControls,
+        IReadOnlyDictionary<long, float> syntheticTurnAngles,
         int[] validIndices,
         float minX,
         float maxX,
@@ -46,6 +48,7 @@ public sealed class RouteGraph : IRoutingGraph
         _routingIndex = routingIndex;
         _otherLanes = otherLanes;
         _turnControls = new Dictionary<long, Vec3>(turnControls);
+        _syntheticTurnAngles = new Dictionary<long, float>(syntheticTurnAngles);
         _validIndices = validIndices;
         MinX = minX;
         MaxX = maxX;
@@ -55,6 +58,9 @@ public sealed class RouteGraph : IRoutingGraph
 
     public bool TryGetSyntheticTurnControl(int from, int to, out Vec3 control) =>
         _turnControls.TryGetValue(EdgeKey(from, to), out control);
+
+    public bool TryGetSyntheticTurnAbsAngle(int from, int to, out float absDegrees) =>
+        _syntheticTurnAngles.TryGetValue(EdgeKey(from, to), out absDegrees);
 
     public float MinX { get; }
     public float MaxX { get; }

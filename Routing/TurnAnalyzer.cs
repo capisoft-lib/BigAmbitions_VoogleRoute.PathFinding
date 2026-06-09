@@ -20,8 +20,7 @@ public static class TurnAnalyzer
             if (incoming >= 0)
             {
                 var afterTo = i + 2 < path.Count ? path[i + 2] : -1;
-                var signed = TurnGeometry.SignedLaneTurnDegrees(
-                    graph, incoming, from, to, afterTo);
+                var signed = SignedTurnDegrees(graph, incoming, from, to, afterTo);
                 var penalty = GetTurnPenalty(graph, incoming, from, to, afterTo);
                 turns.Add(new PathTurn
                 {
@@ -57,8 +56,7 @@ public static class TurnAnalyzer
             if (incoming >= 0 && graph.IsIntersectionNode(from))
             {
                 var afterTo = i + 2 < path.Count ? path[i + 2] : -1;
-                if (TurnGeometry.AbsLaneTurnDegrees(graph, incoming, from, to, afterTo) >=
-                    TurnPenalties.StraightMaxDegrees)
+                if (AbsTurnDegrees(graph, incoming, from, to, afterTo) >= TurnPenalties.StraightMaxDegrees)
                     count++;
             }
 
@@ -95,9 +93,22 @@ public static class TurnAnalyzer
         if (!graph.IsIntersectionNode(at))
             return 0f;
 
-        return TurnPenalties.PenaltyMeters(
-            TurnGeometry.AbsLaneTurnDegrees(graph, incoming, at, to, afterTo));
+        return TurnPenalties.PenaltyMeters(AbsTurnDegrees(graph, incoming, at, to, afterTo));
     }
+
+    private static float SignedTurnDegrees(
+        IRoutingGraph graph, int incoming, int at, int to, int afterTo = -1)
+    {
+        if (graph.IsSyntheticTurnEdge(at, to) &&
+            graph.TryGetSyntheticTurnAbsAngle(at, to, out var csvAbs))
+            return csvAbs;
+
+        return TurnGeometry.SignedLaneTurnDegrees(graph, incoming, at, to, afterTo);
+    }
+
+    private static float AbsTurnDegrees(
+        IRoutingGraph graph, int incoming, int at, int to, int afterTo = -1) =>
+        MathF.Abs(SignedTurnDegrees(graph, incoming, at, to, afterTo));
 }
 
 public readonly record struct TurnSummary(
