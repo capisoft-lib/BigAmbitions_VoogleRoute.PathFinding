@@ -1,0 +1,7 @@
+bin/
+obj/
+DiagRunner/bin/
+DiagRunner/obj/
+*.user
+.DS_Store
+Thumbs.db

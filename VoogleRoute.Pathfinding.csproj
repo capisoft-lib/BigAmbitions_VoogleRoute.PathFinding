@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VoogleRoute.Pathfinding</RootNamespace>
+    <AssemblyName>VoogleRoute.Pathfinding</AssemblyName>
+    <Description>Shared A* pathfinding for VoogleRoute mod and Blazor debugger.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="DiagRunner/**" />
+  </ItemGroup>
+
+</Project>
