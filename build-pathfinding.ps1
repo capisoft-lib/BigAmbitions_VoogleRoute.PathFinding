@@ -8,7 +8,7 @@ try {
     if (-not (Test-Path $dll)) { throw "Build output missing: $dll" }
 
     $targets = @(
-        (Join-Path $root "..\..\Unity\Assets\Mods\VoogleRoute\Dependencies")
+        (Join-Path $root "..\Dependencies")
     )
     foreach ($dir in $targets) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }

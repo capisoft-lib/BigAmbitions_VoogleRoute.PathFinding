@@ -13,10 +13,14 @@ public static class WaypointPathfinder
     private const float DefaultSearchRadius = 120f;
     private const int MaxStartCandidates = 4;
     private const int MaxEndCandidates = 6;
-    private const int MaxAStarNodes = 8192;
+    private const int MaxAStarNodes = 32768;
     private const float CostTieEpsilon = 0.05f;
     private const float OppositeBearingDegrees = 105f;
     private const float StrictStartAlignedSearchRadius = 220f;
+    /// <summary>Préférer l'ancrage sans cap si le trajet est nettement plus court (évite les tours de pâté de maisons).</summary>
+    private const float RelaxedPosePreferMarginMeters = 15f;
+    private const float ShortCorridorMaxMeters = 120f;
+    private const float CorridorEndSearchRadius = 50f;
 
     public static RouteResult? FindBestRoute(IRoutingGraph graph, RouteQuery query) =>
         TryFindBestRoute(graph, query, out var result) ? result : null;
@@ -53,6 +57,52 @@ public static class WaypointPathfinder
     }
 
     public static bool TryFindBestRoute(IRoutingGraph graph, RouteQuery query, out RouteResult result)
+    {
+        if (!TryFindBestRouteSingle(graph, query, out result))
+        {
+            if (!query.HasPose)
+                return false;
+
+            return TryFindBestRouteSingle(
+                graph,
+                new RouteQuery
+                {
+                    Origin = query.Origin,
+                    Destination = query.Destination,
+                    HasPose = false,
+                    Forward = default,
+                    ForcedStartWaypoint = -1,
+                    ForcedEndWaypoint = -1
+                },
+                out result);
+        }
+
+        if (!query.HasPose)
+            return true;
+
+        if (!TryFindBestRouteSingle(
+                graph,
+                new RouteQuery
+                {
+                    Origin = query.Origin,
+                    Destination = query.Destination,
+                    HasPose = false,
+                    Forward = default,
+                    ForcedStartWaypoint = -1,
+                    ForcedEndWaypoint = -1
+                },
+                out var relaxed))
+            return true;
+
+        var poseDist = GetFlatRouteDistance(graph, result);
+        var relaxedDist = GetFlatRouteDistance(graph, relaxed);
+        if (relaxedDist + RelaxedPosePreferMarginMeters < poseDist)
+            result = relaxed;
+
+        return true;
+    }
+
+    private static bool TryFindBestRouteSingle(IRoutingGraph graph, RouteQuery query, out RouteResult result)
     {
         result = null!;
         var origin = query.Origin;
@@ -125,10 +175,11 @@ public static class WaypointPathfinder
 
             endCount = graph.ExpandLaneCandidates(endBuf, endCount, endBuf.Length, default);
             endCount = TrimEndCandidates(graph, endBuf, endCount, destination, MaxEndCandidates);
+            if (graph.FlatDistance(origin, destination) < ShortCorridorMaxMeters)
+                endCount = EnsureShortCorridorEnd(graph, origin, destination, endBuf, endCount);
         }
 
         var bestCost = float.MaxValue;
-        var bestTurnCount = int.MaxValue;
         List<int>? bestPath = null;
         var bestEnd = -1;
         var bestStart = -1;
@@ -145,12 +196,10 @@ public static class WaypointPathfinder
 
                 explored = Math.Max(explored, nodeCount);
                 var cost = EstimateRouteCost(graph, origin, destination, startIdx, endIdx, path);
-                var turnCount = TurnAnalyzer.CountPaidTurns(graph, path);
-                if (!ShouldPreferRoute(cost, turnCount, path, bestCost, bestTurnCount, bestPath))
+                if (!ShouldPreferRoute(cost, path, bestCost, bestPath))
                     continue;
 
                 bestCost = cost;
-                bestTurnCount = turnCount;
                 bestPath = path;
                 bestEnd = endIdx;
                 bestStart = startIdx;
@@ -331,27 +380,17 @@ public static class WaypointPathfinder
 
     private static bool ShouldPreferRoute(
         float cost,
-        int turnCount,
         List<int> candidate,
         float bestCost,
-        int bestTurnCount,
         List<int>? best)
     {
         if (best == null)
-            return true;
-
-        var savedTurns = bestTurnCount - turnCount;
-        if (savedTurns > 0 &&
-            cost <= bestCost + savedTurns * TurnPenalties.SelectionMetersPerTurn)
             return true;
 
         if (cost < bestCost - CostTieEpsilon)
             return true;
         if (MathF.Abs(cost - bestCost) > CostTieEpsilon)
             return false;
-
-        if (turnCount != bestTurnCount)
-            return turnCount < bestTurnCount;
 
         if (candidate.Count != best.Count)
             return candidate.Count < best.Count;
@@ -460,6 +499,57 @@ public static class WaypointPathfinder
         }
 
         return best;
+    }
+
+    private static int EnsureShortCorridorEnd(
+        IRoutingGraph graph,
+        Vec3 origin,
+        Vec3 destination,
+        int[] buffer,
+        int count)
+    {
+        var probe = SelectShortCorridorProbe(origin, destination);
+        if (!graph.TryFindNearest(probe, CorridorEndSearchRadius, out var corridorEnd))
+            return count;
+
+        for (var i = 0; i < count; i++)
+        {
+            if (buffer[i] == corridorEnd)
+                return count;
+        }
+
+        if (count < MaxEndCandidates)
+            buffer[count++] = corridorEnd;
+        else
+            buffer[MaxEndCandidates - 1] = corridorEnd;
+
+        return Math.Min(count, MaxEndCandidates);
+    }
+
+    private static Vec3 SelectShortCorridorProbe(Vec3 origin, Vec3 destination)
+    {
+        var dx = MathF.Abs(destination.X - origin.X);
+        var dz = MathF.Abs(destination.Z - origin.Z);
+        return dx >= dz
+            ? new Vec3(destination.X, origin.Y, origin.Z)
+            : new Vec3(origin.X, origin.Y, destination.Z);
+    }
+
+    private static int TryAppendEndCandidate(IRoutingGraph graph, int[] buffer, int count, Vec3 probe)
+    {
+        if (count >= buffer.Length)
+            return count;
+        if (!graph.TryFindNearest(probe, CorridorEndSearchRadius, out var idx))
+            return count;
+
+        for (var i = 0; i < count; i++)
+        {
+            if (buffer[i] == idx)
+                return count;
+        }
+
+        buffer[count++] = idx;
+        return count;
     }
 
     private static int TrimEndCandidates(IRoutingGraph graph, int[] buffer, int count, Vec3 destination, int maxCount)

@@ -41,12 +41,14 @@ public static class CsvRouteGraphLoader
             {
                 if (!TryParseInt(cols[3], out var from) || !TryParseInt(cols[10], out var to))
                     continue;
-                if (!TryParseFloat(cols[7], out var fx) || !TryParseFloat(cols[9], out var fz) ||
-                    !TryParseFloat(cols[14], out var tx) || !TryParseFloat(cols[16], out var tz))
+                if (!TryParseFloat(cols[7], out var fx) || !TryParseFloat(cols[8], out var fy) ||
+                    !TryParseFloat(cols[9], out var fz) ||
+                    !TryParseFloat(cols[14], out var tx) || !TryParseFloat(cols[15], out var ty) ||
+                    !TryParseFloat(cols[16], out var tz))
                     continue;
 
-                positions[from] = new Vec3(fx, 0, fz);
-                positions[to] = new Vec3(tx, 0, tz);
+                positions[from] = new Vec3(fx, fy, fz);
+                positions[to] = new Vec3(tx, ty, tz);
                 roadByIndex[from] = cols[5];
                 roadByIndex[to] = cols[11];
                 AddEdge(forward, from, to);
@@ -59,12 +61,14 @@ public static class CsvRouteGraphLoader
 
                 if (!TryParseInt(cols[3], out var from) || !TryParseInt(cols[10], out var to))
                     continue;
-                if (!TryParseFloat(cols[7], out var fx) || !TryParseFloat(cols[9], out var fz) ||
-                    !TryParseFloat(cols[14], out var tx) || !TryParseFloat(cols[16], out var tz))
+                if (!TryParseFloat(cols[7], out var fx) || !TryParseFloat(cols[8], out var fy) ||
+                    !TryParseFloat(cols[9], out var fz) ||
+                    !TryParseFloat(cols[14], out var tx) || !TryParseFloat(cols[15], out var ty) ||
+                    !TryParseFloat(cols[16], out var tz))
                     continue;
 
-                positions[from] = new Vec3(fx, 0, fz);
-                positions[to] = new Vec3(tx, 0, tz);
+                positions[from] = new Vec3(fx, fy, fz);
+                positions[to] = new Vec3(tx, ty, tz);
                 roadByIndex[from] = cols[5];
                 roadByIndex[to] = cols[11];
 
@@ -88,8 +92,8 @@ public static class CsvRouteGraphLoader
                 else
                 {
                     edgeLengths[edgeKey] = ManeuverGeometry.SyntheticTurnTravelMeters(
-                        new Vec3(fx, 0, fz),
-                        new Vec3(tx, 0, tz),
+                        new Vec3(fx, fy, fz),
+                        new Vec3(tx, ty, tz),
                         control);
                 }
 
