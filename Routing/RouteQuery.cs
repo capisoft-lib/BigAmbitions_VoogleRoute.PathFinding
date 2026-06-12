@@ -11,6 +11,8 @@ public readonly struct RouteQuery
     public bool HasPose { get; init; }
     public int ForcedStartWaypoint { get; init; }
     public int ForcedEndWaypoint { get; init; }
+    /// <summary>Prefer arrival lanes on the same street side as the destination.</summary>
+    public bool ForceBuildingSide { get; init; }
 
     public static RouteQuery FromWorldCoords(float startX, float startZ, float headingDeg, float destX, float destZ)
     {

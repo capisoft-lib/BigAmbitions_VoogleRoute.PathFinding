@@ -72,7 +72,8 @@ public static class WaypointPathfinder
                     HasPose = false,
                     Forward = default,
                     ForcedStartWaypoint = -1,
-                    ForcedEndWaypoint = -1
+                    ForcedEndWaypoint = -1,
+                    ForceBuildingSide = query.ForceBuildingSide
                 },
                 out result);
         }
@@ -89,7 +90,8 @@ public static class WaypointPathfinder
                     HasPose = false,
                     Forward = default,
                     ForcedStartWaypoint = -1,
-                    ForcedEndWaypoint = -1
+                    ForcedEndWaypoint = -1,
+                    ForceBuildingSide = query.ForceBuildingSide
                 },
                 out var relaxed))
             return true;
@@ -175,6 +177,8 @@ public static class WaypointPathfinder
 
             endCount = graph.ExpandLaneCandidates(endBuf, endCount, endBuf.Length, default);
             endCount = TrimEndCandidates(graph, endBuf, endCount, destination, MaxEndCandidates);
+            if (query.ForceBuildingSide)
+                endCount = FilterBuildingSideEndCandidates(graph, endBuf, endCount, destination);
             if (graph.FlatDistance(origin, destination) < ShortCorridorMaxMeters)
                 endCount = EnsureShortCorridorEnd(graph, origin, destination, endBuf, endCount);
         }
@@ -551,6 +555,84 @@ public static class WaypointPathfinder
         buffer[count++] = idx;
         return count;
     }
+
+    private static int FilterBuildingSideEndCandidates(
+        IRoutingGraph graph, int[] buffer, int count, Vec3 destination)
+    {
+        if (count <= 1)
+            return count;
+
+        if (!TryResolveBuildingStreetSide(graph, destination, out var anchor, out var tangent, out var buildingLateral))
+            return count;
+
+        var kept = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var pos = graph.GetPosition(buffer[i]);
+            if (IsOnBuildingStreetSide(anchor, tangent, buildingLateral, pos))
+                buffer[kept++] = buffer[i];
+        }
+
+        return kept > 0 ? kept : count;
+    }
+
+    private static bool TryResolveBuildingStreetSide(
+        IRoutingGraph graph,
+        Vec3 destination,
+        out Vec3 anchor,
+        out Vec3 tangent,
+        out float buildingLateral)
+    {
+        anchor = default;
+        tangent = default;
+        buildingLateral = 0f;
+
+        var probe = new int[4];
+        var count = graph.CollectNearest(destination, 45f, probe);
+        if (count == 0)
+            return false;
+
+        anchor = graph.GetPosition(probe[0]);
+        if (!TryGetRoadTangent(graph, probe[0], out tangent))
+            return false;
+
+        buildingLateral = FlatLateralOffset(tangent, anchor, destination);
+        return true;
+    }
+
+    private static bool TryGetRoadTangent(IRoutingGraph graph, int waypointIdx, out Vec3 tangent)
+    {
+        tangent = default;
+        if (!TryGetForwardBearing(graph, waypointIdx, out var bearingDeg))
+            return false;
+
+        var rad = bearingDeg * (MathF.PI / 180f);
+        tangent = new Vec3(MathF.Sin(rad), 0, MathF.Cos(rad));
+        return tangent.SqrMagnitude > 0.01f;
+    }
+
+    private static bool IsOnBuildingStreetSide(
+        Vec3 anchor,
+        Vec3 tangent,
+        float buildingLateral,
+        Vec3 candidatePoint)
+    {
+        var lateral = FlatLateralOffset(tangent, anchor, candidatePoint);
+        if (MathF.Abs(buildingLateral) < 1.5f)
+            return MathF.Abs(lateral) < 12f;
+
+        return LateralSign(lateral) == LateralSign(buildingLateral);
+    }
+
+    private static float FlatLateralOffset(Vec3 tangent, Vec3 anchor, Vec3 point)
+    {
+        var dx = point.X - anchor.X;
+        var dz = point.Z - anchor.Z;
+        return dx * tangent.Z + dz * (-tangent.X);
+    }
+
+    private static int LateralSign(float value) =>
+        value > 0.5f ? 1 : value < -0.5f ? -1 : 0;
 
     private static int TrimEndCandidates(IRoutingGraph graph, int[] buffer, int count, Vec3 destination, int maxCount)
     {
