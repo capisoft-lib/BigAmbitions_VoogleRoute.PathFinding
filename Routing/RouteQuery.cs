@@ -12,6 +12,17 @@ public readonly struct RouteQuery
     public int ForcedStartWaypoint { get; init; }
     public int ForcedEndWaypoint { get; init; }
 
+    /// <summary>When false, the first graph step cannot use CSV U-turn connectors (parallel-lane reversals).</summary>
+    public bool AllowUturnAtStart { get; init; }
+
+    /// <summary>Prefer ending on the lane closest to the building (correct street side).</summary>
+    public bool PreferBuildingSideArrival { get; init; }
+
+    /// <summary>Game/navmesh snap on the building-side lane (from mod layer). Falls back to Destination.</summary>
+    public bool HasArrivalRoadHint { get; init; }
+
+    public Vec3 ArrivalRoadHint { get; init; }
+
     public static RouteQuery FromWorldCoords(float startX, float startZ, float headingDeg, float destX, float destZ)
     {
         var hasPose = !float.IsNaN(headingDeg);
@@ -23,7 +34,8 @@ public readonly struct RouteQuery
             Forward = forward,
             HasPose = hasPose,
             ForcedStartWaypoint = -1,
-            ForcedEndWaypoint = -1
+            ForcedEndWaypoint = -1,
+            AllowUturnAtStart = true
         };
     }
 

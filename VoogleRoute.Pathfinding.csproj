@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <Compile Remove="DiagRunner/**" />
+    <Compile Remove="Tests/**" />
   </ItemGroup>
 
 </Project>

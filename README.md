@@ -12,6 +12,8 @@ Shared **netstandard2.1** routing library for [Voogle Route](https://github.com/
 
 ```text
 Graph/ Routing/ Geometry/     C# library sources
+  Geometry/VehicleRoutePolyline.cs   A* + polyline (single source of truth for display)
+Tests/                         xUnit vehicle routing (4 rules × multiple scenarios)
 data/                          shipped route graph CSV (source of truth)
 tools/generate_enhanced_route_graph.py
 tools/sync-route-data.ps1      copy data/*.csv into a mod checkout
@@ -26,6 +28,28 @@ dotnet build VoogleRoute.Pathfinding.csproj -c Release
 ```
 
 Output: `bin/Release/netstandard2.1/VoogleRoute.Pathfinding.dll`
+
+## Unit tests (vehicle routing)
+
+xUnit project under `Tests/` — vehicle and outdoor foot routing.
+
+```powershell
+dotnet test VoogleRoute.Pathfinding.sln -c Release
+```
+
+**Vehicle:** 8 scenarios × 4 rule combos + Third & 45th goldens + 28 waypoint probes (bridge/industrial/north).
+
+**Foot (outdoor):** direct walk, subway when walk-only shorter, edge cases (partial, radius, tie).
+
+**Graph:** node count, CSV edge mix, critical reachability, isolated components.
+
+```powershell
+dotnet test VoogleRoute.Pathfinding.sln -c Release
+```
+
+103 tests — exit code 0 required before routing changes ship.
+
+Legacy console probes: `DiagRunner/` (`--scenario third45`, etc.).
 
 ## Consumers
 

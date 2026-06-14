@@ -1,0 +1,4 @@
+station_name,neighborhood,x,y,z,nav_x,nav_y,nav_z
+Fixture_A,ba:neighborhood_downtown,10,0,20,12.5,0,22
+Fixture_B,ba:neighborhood_mid,50,0,-30,51,0,-29
+Fixture_C,ba:neighborhood_industriacity,200,0,-400,201,0,-399

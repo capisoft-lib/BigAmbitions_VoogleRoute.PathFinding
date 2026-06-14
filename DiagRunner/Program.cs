@@ -11,6 +11,7 @@ var csv = args.Length > 0 && !args[0].StartsWith("--")
 var stage = GetArg(args, "--stage");
 var pairArgs = args.Where(a => a.StartsWith("--pair=")).Select(a => a["--pair=".Length..]).ToList();
 var repro = GetArg(args, "--repro");
+var scenario = GetArg(args, "--scenario");
 
 if (!File.Exists(csv))
 {
@@ -21,6 +22,24 @@ if (!File.Exists(csv))
 var graph = CsvRouteGraphLoader.LoadFromEnhancedCsv(csv);
 Console.WriteLine($"Graph size={graph.Size} csv={Path.GetFileName(csv)}");
 Console.WriteLine($"MaxAStarNodes=32768 (WaypointPathfinder)");
+
+if (scenario == "third45")
+{
+    var failed = RunThirdStreet45Scenario(graph);
+    return failed ? 1 : 0;
+}
+
+if (scenario == "third45_ingame")
+{
+    var failed = RunThirdStreet45InGameScenario(graph);
+    return failed ? 1 : 0;
+}
+
+if (scenario == "third45_hint")
+{
+    RunThirdStreet45HintRegression(graph);
+    return 0;
+}
 
 if (repro == "log")
 {
@@ -173,6 +192,167 @@ static string? GetArg(string[] args, string name)
     return args[idx + 1];
 }
 
+static bool RunThirdStreet45Scenario(RouteGraph graph)
+{
+    // From voogle-route_2026-06-14_15-52-34.log (45 3rd St, car on 3rd facing south).
+    var origin = new Vec3(220.98f, 0.01f, -235.04f);
+    var dest = new Vec3(214.21f, 0.09f, -136.95f);
+    var forward = new Vec3(0f, 0f, -1f); // heading 180°
+
+    Console.WriteLine("# third45 | origin=(220.98,-235.04) heading=180 dest=(214.21,-136.95)");
+    Console.WriteLine("# building=west side of 3rd St — correct lane is west (~x=213-215), wrong lane is east (~x=225)");
+
+    var cases = new (string id, bool preferSide, bool allowUturn, float maxCostMeters, int expectedEndWp)[]
+    {
+        ("release_v0.11.7", false, true, 140f, 13393),
+        ("side_off_uturn_off", false, false, 700f, 13393),
+        ("side_on_uturn_on", true, true, 750f, 7242),
+        ("side_on_uturn_off", true, false, 900f, 7242),
+    };
+
+    var anyFail = false;
+    foreach (var (id, preferSide, allowUturn, maxCost, expectedEndWp) in cases)
+    {
+        if (!TryRunThird45Case(graph, origin, dest, forward, id, preferSide, allowUturn, hasHint: false, default,
+                maxCost, expectedEndWp))
+            anyFail = true;
+    }
+
+    return anyFail;
+}
+
+static bool RunThirdStreet45InGameScenario(RouteGraph graph)
+{
+    // From voogle-route_2026-06-14_16-48-31.log — exact in-game pose after config sync fix.
+    var origin = new Vec3(221.36f, 0.01f, -279.60f);
+    var dest = new Vec3(214.21f, 0.09f, -136.95f);
+    var forward = new Vec3(0f, 0f, -1f);
+
+    Console.WriteLine("# third45_ingame | origin=(221.36,-279.60) heading=180 dest=(214.21,-136.95)");
+    Console.WriteLine("# parity with ModsLocal session 16-48-31 | preferSide=True allowUturn=False");
+
+    return !TryRunThird45Case(graph, origin, dest, forward, "ingame_side_on_uturn_off", true, false,
+        hasHint: false, default, maxCostMeters: 950f, expectedEndWp: 7242);
+}
+
+static bool TryRunThird45Case(
+    RouteGraph graph,
+    Vec3 origin,
+    Vec3 dest,
+    Vec3 forward,
+    string id,
+    bool preferSide,
+    bool allowUturn,
+    bool hasHint,
+    Vec3 arrivalHint,
+    float maxCostMeters,
+    int expectedEndWp)
+{
+    var query = new RouteQuery
+    {
+        Origin = origin,
+        Destination = dest,
+        Forward = forward,
+        HasPose = true,
+        ForcedStartWaypoint = -1,
+        ForcedEndWaypoint = -1,
+        AllowUturnAtStart = allowUturn,
+        PreferBuildingSideArrival = preferSide,
+        HasArrivalRoadHint = hasHint,
+        ArrivalRoadHint = arrivalHint,
+    };
+
+    if (!VehicleRoutePolyline.TryBuild(graph, query, out var built))
+    {
+        Console.WriteLine($"ROUTE {id} FAIL preferSide={preferSide} allowUturn={allowUturn}");
+        return false;
+    }
+
+    var endPos = graph.GetPosition(built.Route.EndWaypoint);
+    var poly = built.Points;
+    Console.WriteLine(
+        $"ROUTE {id} OK preferSide={preferSide} allowUturn={allowUturn} append={built.AppendMode} " +
+        $"pathWp={built.Route.Path.Count} poly={poly.Count} cost={built.GraphCostMeters:F1}m " +
+        $"polyLen={built.PolylineLengthMeters:F1}m startWp={built.Route.StartWaypoint} endWp={built.Route.EndWaypoint} " +
+        $"endLane=({endPos.X:F2},{endPos.Z:F2}) last=({poly[^1].X:F2},{poly[^1].Z:F2})");
+
+    var ok = true;
+    if (built.Route.EndWaypoint != expectedEndWp)
+    {
+        Console.WriteLine($"ASSERT {id} endWp: got {built.Route.EndWaypoint} want {expectedEndWp}");
+        ok = false;
+    }
+
+    if (built.GraphCostMeters > maxCostMeters)
+    {
+        Console.WriteLine($"ASSERT {id} cost: got {built.GraphCostMeters:F1}m max {maxCostMeters:F0}m");
+        ok = false;
+    }
+
+    if (preferSide && !allowUturn)
+    {
+        var onThird = poly.Where(p => p.Z > -280f && p.Z < -120f).ToList();
+        if (onThird.Count > 0)
+        {
+            var maxX = onThird.Max(p => p.X);
+            if (maxX > 222.5f)
+            {
+                Console.WriteLine($"ASSERT {id} lane: maxX on 3rd segment={maxX:F2} want <222.5 (not east lane ~225)");
+                ok = false;
+            }
+        }
+    }
+
+    foreach (var p in poly)
+        Console.WriteLine($"  {p.X:F3} {p.Z:F3}");
+    Console.WriteLine(ok ? "ASSERT OK" : "ASSERT FAIL");
+    Console.WriteLine("ENDROUTE");
+    Console.WriteLine();
+    return ok;
+}
+
+static void RunThirdStreet45HintRegression(RouteGraph graph)
+{
+    // From voogle-route_2026-06-14_16-25-09.log — in-game navmesh snap lands on east lane (~225).
+    var origin = new Vec3(221.20f, 0.01f, -256.45f);
+    var dest = new Vec3(214.21f, 0.09f, -136.95f);
+    var forward = new Vec3(0f, 0f, -1f);
+    var wrongHint = new Vec3(225.40f, 0.01f, -138.82f);
+
+    Console.WriteLine("# third45_hint | wrong east-lane arrival hint must not break building-side routing");
+
+    var query = new RouteQuery
+    {
+        Origin = origin,
+        Destination = dest,
+        Forward = forward,
+        HasPose = true,
+        AllowUturnAtStart = false,
+        PreferBuildingSideArrival = true,
+        HasArrivalRoadHint = true,
+        ArrivalRoadHint = wrongHint,
+    };
+
+    if (!VehicleRoutePolyline.TryBuild(graph, query, out var built))
+    {
+        Console.WriteLine("REGRESSION FAIL preferSide=True with wrong navmesh hint");
+        return;
+    }
+
+    var endPos = graph.GetPosition(built.Route.EndWaypoint);
+    Console.WriteLine(
+        $"REGRESSION OK append={built.AppendMode} poly={built.Points.Count} endWp={built.Route.EndWaypoint} " +
+        $"endLane=({endPos.X:F2},{endPos.Z:F2}) last=({built.Points[^1].X:F2},{built.Points[^1].Z:F2})");
+
+    var onThird = built.Points.Where(p => p.Z > -280f && p.Z < -120f).ToList();
+    if (onThird.Count > 0)
+    {
+        var avgX = onThird.Average(p => p.X);
+        var maxX = onThird.Max(p => p.X);
+        Console.WriteLine($"REGRESSION lane check | points_on_3rd={onThird.Count} avgX={avgX:F2} maxX={maxX:F2} (want <222, not ~225)");
+    }
+}
+
 static void RunLogRepro(RouteGraph graph)
 {
     var cases = new (string label, Vec3 origin, Vec3 dest)[]
@@ -286,17 +466,15 @@ static void ComparePoseVsRelaxed(RouteGraph graph, Vec3 origin, Vec3 dest, Vec3 
 
 static void ProbeQuery(RouteGraph graph, string label, RouteQuery query)
 {
-    if (!WaypointPathfinder.TryFindBestRoute(graph, query, out var r))
+    if (!VehicleRoutePolyline.TryBuild(graph, query, out var built))
     {
         Console.WriteLine($"{label}: FAIL");
         return;
     }
 
-    var poly = RoutePolylineBuilder.BuildPoints(
-        graph, r.Path, prependOrigin: query.Origin, appendDestination: query.Destination);
     Console.WriteLine(
-        $"{label}: OK path={r.Path.Count} explored={r.NodesExplored} poly={poly.Count} " +
-        $"wp {r.StartWaypoint}->{r.EndWaypoint}");
+        $"{label}: OK path={built.Route.Path.Count} explored={built.Route.NodesExplored} poly={built.Points.Count} " +
+        $"append={built.AppendMode} wp {built.Route.StartWaypoint}->{built.Route.EndWaypoint}");
 }
 
 readonly record struct ProbePair(string Label, int Start, int End, string Note);

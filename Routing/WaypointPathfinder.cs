@@ -31,8 +31,8 @@ public static class WaypointPathfinder
             return new RouteCompareResult { Error = "Aucun chemin trouvé avec les pénalités de virage." };
 
         RouteResult? withoutPenalties = null;
-        if (TryAStar(graph, withPenalties.StartWaypoint, withPenalties.EndWaypoint, useGraphTravelCost: false,
-                out var flatPath, out var explored))
+        if (TryAStar(graph, withPenalties.StartWaypoint, withPenalties.EndWaypoint,
+                allowUturnAtStart: true, useGraphTravelCost: false, out var flatPath, out var explored))
         {
             var turns = TurnAnalyzer.AnalyzePath(graph, flatPath);
             withoutPenalties = new RouteResult
@@ -60,7 +60,7 @@ public static class WaypointPathfinder
     {
         if (!TryFindBestRouteSingle(graph, query, out result))
         {
-            if (!query.HasPose)
+            if (!query.HasPose || !query.AllowUturnAtStart)
                 return false;
 
             return TryFindBestRouteSingle(
@@ -72,12 +72,16 @@ public static class WaypointPathfinder
                     HasPose = false,
                     Forward = default,
                     ForcedStartWaypoint = -1,
-                    ForcedEndWaypoint = -1
+                    ForcedEndWaypoint = -1,
+                    AllowUturnAtStart = query.AllowUturnAtStart,
+                    PreferBuildingSideArrival = query.PreferBuildingSideArrival,
+                    HasArrivalRoadHint = query.HasArrivalRoadHint,
+                    ArrivalRoadHint = query.ArrivalRoadHint
                 },
                 out result);
         }
 
-        if (!query.HasPose)
+        if (!query.HasPose || !query.AllowUturnAtStart)
             return true;
 
         if (!TryFindBestRouteSingle(
@@ -89,7 +93,11 @@ public static class WaypointPathfinder
                     HasPose = false,
                     Forward = default,
                     ForcedStartWaypoint = -1,
-                    ForcedEndWaypoint = -1
+                    ForcedEndWaypoint = -1,
+                    AllowUturnAtStart = query.AllowUturnAtStart,
+                    PreferBuildingSideArrival = query.PreferBuildingSideArrival,
+                    HasArrivalRoadHint = query.HasArrivalRoadHint,
+                    ArrivalRoadHint = query.ArrivalRoadHint
                 },
                 out var relaxed))
             return true;
@@ -107,6 +115,7 @@ public static class WaypointPathfinder
         result = null!;
         var origin = query.Origin;
         var destination = query.Destination;
+        var building = destination;
         var hasPose = query.HasPose;
         var forward = query.Forward;
 
@@ -142,8 +151,11 @@ public static class WaypointPathfinder
                 if (startCount == 0)
                     return false;
 
-                startCount = graph.ExpandLaneCandidates(startBuf, startCount, startBuf.Length, forward);
-                startCount = FilterFlowAligned(graph, startBuf, startCount, forward);
+                if (query.AllowUturnAtStart)
+                {
+                    startCount = graph.ExpandLaneCandidates(startBuf, startCount, startBuf.Length, forward);
+                    startCount = FilterFlowAligned(graph, startBuf, startCount, forward);
+                }
             }
             else
             {
@@ -164,17 +176,21 @@ public static class WaypointPathfinder
         }
         else
         {
-            endCount = graph.CollectNearest(destination, radius, endBuf);
+            var endSearch = destination;
+
+            endCount = graph.CollectNearest(endSearch, radius, endBuf);
             if (endCount == 0)
             {
-                if (!graph.TryFindNearest(destination, 200f, out var fallbackEnd))
+                if (!graph.TryFindNearest(endSearch, 200f, out var fallbackEnd))
                     return false;
                 endBuf[0] = fallbackEnd;
                 endCount = 1;
             }
 
             endCount = graph.ExpandLaneCandidates(endBuf, endCount, endBuf.Length, default);
-            endCount = TrimEndCandidates(graph, endBuf, endCount, destination, MaxEndCandidates);
+            endCount = TrimEndCandidates(graph, endBuf, endCount, endSearch, MaxEndCandidates);
+            if (query.PreferBuildingSideArrival)
+                endCount = FilterBuildingSideEndCandidates(graph, endBuf, endCount, building);
             if (graph.FlatDistance(origin, destination) < ShortCorridorMaxMeters)
                 endCount = EnsureShortCorridorEnd(graph, origin, destination, endBuf, endCount);
         }
@@ -191,11 +207,11 @@ public static class WaypointPathfinder
             for (var ei = 0; ei < endCount; ei++)
             {
                 var endIdx = endBuf[ei];
-                if (!TryAStar(graph, startIdx, endIdx, out var path, out var nodeCount))
+                if (!TryAStar(graph, startIdx, endIdx, query.AllowUturnAtStart, query, out var path, out var nodeCount))
                     continue;
 
                 explored = Math.Max(explored, nodeCount);
-                var cost = EstimateRouteCost(graph, origin, destination, startIdx, endIdx, path);
+                var cost = EstimateRouteCost(graph, origin, query, startIdx, endIdx, path);
                 if (!ShouldPreferRoute(cost, path, bestCost, bestPath))
                     continue;
 
@@ -209,6 +225,9 @@ public static class WaypointPathfinder
         if (bestPath == null || bestPath.Count == 0)
             return false;
 
+        if (query.PreferBuildingSideArrival && bestEnd >= 0)
+            ApplyBuildingSideEnd(graph, query, bestPath, ref bestEnd);
+
         var turns = TurnAnalyzer.AnalyzePath(graph, bestPath);
         result = new RouteResult
         {
@@ -217,7 +236,9 @@ public static class WaypointPathfinder
             EndWaypoint = bestEnd,
             GraphCostMeters = graph.EstimatePathTravelCost(bestPath),
             AccessStartMeters = graph.FlatDistance(origin, graph.GetPosition(bestStart)),
-            AccessEndMeters = graph.EstimateArrivalLegCost(bestEnd, destination),
+            AccessEndMeters = query.PreferBuildingSideArrival
+                ? graph.FlatDistance(graph.GetPosition(bestEnd), building)
+                : graph.EstimateArrivalLegCost(bestEnd, destination),
             NodesExplored = explored,
             Turns = turns,
             TurnSummary = TurnAnalyzer.Summarize(turns)
@@ -257,10 +278,41 @@ public static class WaypointPathfinder
 
     private static bool TryAStar(
         IRoutingGraph graph, int start, int goal, out List<int> path, out int explored) =>
-        TryAStar(graph, start, goal, useGraphTravelCost: true, out path, out explored);
+        TryAStar(graph, start, goal, allowUturnAtStart: true, out path, out explored);
 
     private static bool TryAStar(
-        IRoutingGraph graph, int start, int goal, bool useGraphTravelCost, out List<int> path, out int explored)
+        IRoutingGraph graph, int start, int goal, bool allowUturnAtStart, out List<int> path, out int explored) =>
+        TryAStar(graph, start, goal, allowUturnAtStart, useGraphTravelCost: true, out path, out explored);
+
+    private static bool TryAStar(
+        IRoutingGraph graph,
+        int start,
+        int goal,
+        bool allowUturnAtStart,
+        RouteQuery query,
+        out List<int> path,
+        out int explored) =>
+        TryAStar(graph, start, goal, allowUturnAtStart, useGraphTravelCost: true, query, out path, out explored);
+
+    private static bool TryAStar(
+        IRoutingGraph graph,
+        int start,
+        int goal,
+        bool allowUturnAtStart,
+        bool useGraphTravelCost,
+        out List<int> path,
+        out int explored) =>
+        TryAStar(graph, start, goal, allowUturnAtStart, useGraphTravelCost, default, out path, out explored);
+
+    private static bool TryAStar(
+        IRoutingGraph graph,
+        int start,
+        int goal,
+        bool allowUturnAtStart,
+        bool useGraphTravelCost,
+        RouteQuery query,
+        out List<int> path,
+        out int explored)
     {
         path = new List<int>();
         explored = 0;
@@ -288,9 +340,11 @@ public static class WaypointPathfinder
             var incoming = cameFrom.TryGetValue(current, out var prev) ? prev : -1;
             var gCurrent = gScore.TryGetValue(current, out var gc) ? gc : float.MaxValue;
 
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, graph.GetForwardNeighbors(current),
+            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
+                graph.GetForwardNeighbors(current),
                 closed, open, openSet, cameFrom, gScore, fScore);
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, graph.GetLaneChangeNeighbors(current),
+            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
+                graph.GetLaneChangeNeighbors(current),
                 closed, open, openSet, cameFrom, gScore, fScore);
         }
 
@@ -304,6 +358,8 @@ public static class WaypointPathfinder
         float gCurrent,
         int goal,
         bool useGraphTravelCost,
+        bool allowUturnAtStart,
+        RouteQuery query,
         ReadOnlySpan<int> neighbors,
         HashSet<int> closed,
         List<int> open,
@@ -319,10 +375,14 @@ public static class WaypointPathfinder
                 continue;
             if (!graph.IsForwardEdgeAllowed(incoming, current, next))
                 continue;
+            if (!allowUturnAtStart && incoming < 0 &&
+                StartManeuverPolicy.IsBlockedManeuverAtStart(graph, current, next))
+                continue;
 
             var step = useGraphTravelCost
                 ? graph.GetForwardTravelCost(current, next, incoming)
                 : graph.FlatDistance(graph.GetPosition(current), graph.GetPosition(next));
+            step += BuildingSideTravelPenalty(graph, query, next);
             var tentative = gCurrent + step;
             if (gScore.TryGetValue(next, out var existing) && tentative >= existing)
                 continue;
@@ -373,10 +433,22 @@ public static class WaypointPathfinder
     }
 
     private static float EstimateRouteCost(
-        IRoutingGraph graph, Vec3 origin, Vec3 destination, int startIdx, int endIdx, List<int> path) =>
-        graph.FlatDistance(origin, graph.GetPosition(startIdx)) +
-        graph.EstimatePathTravelCost(path) +
-        graph.EstimateArrivalLegCost(endIdx, destination);
+        IRoutingGraph graph,
+        Vec3 origin,
+        RouteQuery query,
+        int startIdx,
+        int endIdx,
+        List<int> path)
+    {
+        var building = query.Destination;
+        var arrivalEnd = query.PreferBuildingSideArrival
+            ? FindBestBuildingSideEndNearTarget(graph, endIdx, building)
+            : endIdx;
+
+        return graph.FlatDistance(origin, graph.GetPosition(startIdx)) +
+               graph.EstimatePathTravelCost(path) +
+               graph.FlatDistance(graph.GetPosition(arrivalEnd), building);
+    }
 
     private static bool ShouldPreferRoute(
         float cost,
@@ -580,6 +652,251 @@ public static class WaypointPathfinder
         }
 
         return limit;
+    }
+
+    private const float BuildingSideLaneMarginMeters = 4.5f;
+    private const float BuildingSideMinLateralMeters = 0.5f;
+    private const float BuildingSideParallelLaneSeparationMeters = 3f;
+    /// <summary>Perpendicular distance from destination street — avoids penalizing detour legs on other roads.</summary>
+    private const float BuildingSideArrivalCrossStreetMeters = 14f;
+    /// <summary>Max distance along the destination street from the building where wrong-lane penalty applies.</summary>
+    private const float BuildingSideArrivalAlongStreetMeters = 110f;
+    private const float BuildingSideWrongLanePenaltyMeters = 45f;
+    private const float BuildingSideCrossOffsetPenaltyPerMeter = 4f;
+    private const float BuildingSideCrossOffsetFreeMeters = 7f;
+
+    /// <summary>Signed lateral offset of building to the right of lane travel (US curb side).</summary>
+    private static float ScoreBuildingSideLateral(IRoutingGraph graph, int wpIdx, Vec3 building)
+    {
+        if (!LaneFlow.TryGetLaneForwardBearing(graph, wpIdx, out var bearingDeg))
+            return float.NegativeInfinity;
+
+        var wp = graph.GetPosition(wpIdx);
+        var dx = building.X - wp.X;
+        var dz = building.Z - wp.Z;
+        var rad = bearingDeg * (MathF.PI / 180f);
+        var fwdX = MathF.Sin(rad);
+        var fwdZ = MathF.Cos(rad);
+        var rightX = fwdZ;
+        var rightZ = -fwdX;
+        return rightX * dx + rightZ * dz;
+    }
+
+    private static int TrimToNearestBuildingLanes(
+        IRoutingGraph graph,
+        int[] buffer,
+        int count,
+        Vec3 building)
+    {
+        if (count <= 1)
+            return count;
+
+        var minDist = float.MaxValue;
+        for (var i = 0; i < count; i++)
+        {
+            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            if (dist < minDist)
+                minDist = dist;
+        }
+
+        var kept = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            if (dist > minDist + BuildingSideParallelLaneSeparationMeters)
+                continue;
+            buffer[kept++] = buffer[i];
+        }
+
+        return kept > 0 ? kept : count;
+    }
+
+    /// <summary>Extra A* step cost near destination when a parallel lane is closer to the building.</summary>
+    private static float BuildingSideTravelPenalty(IRoutingGraph graph, RouteQuery query, int wpIdx)
+    {
+        if (!query.PreferBuildingSideArrival)
+            return 0f;
+
+        var building = query.Destination;
+        var wp = graph.GetPosition(wpIdx);
+        var cross = CrossStreetOffset(graph, wpIdx, wp, building);
+        if (cross > BuildingSideArrivalCrossStreetMeters)
+            return 0f;
+
+        var flat = graph.FlatDistance(wp, building);
+        var along = MathF.Sqrt(MathF.Max(0f, flat * flat - cross * cross));
+        if (along > BuildingSideArrivalAlongStreetMeters)
+            return 0f;
+
+        var lateral = ScoreBuildingSideLateral(graph, wpIdx, building);
+        if (lateral <= BuildingSideMinLateralMeters)
+            return BuildingSideWrongLanePenaltyMeters;
+
+        if (cross <= BuildingSideCrossOffsetFreeMeters)
+            return 0f;
+
+        return (cross - BuildingSideCrossOffsetFreeMeters) * BuildingSideCrossOffsetPenaltyPerMeter;
+    }
+
+    /// <summary>Perpendicular distance from waypoint to building along the cross-street axis.</summary>
+    private static float CrossStreetOffset(IRoutingGraph graph, int wpIdx, Vec3 wp, Vec3 building)
+    {
+        if (!LaneFlow.TryGetLaneForwardBearing(graph, wpIdx, out var bearingDeg))
+            return MathF.Min(MathF.Abs(wp.X - building.X), MathF.Abs(wp.Z - building.Z));
+
+        var rad = bearingDeg * (MathF.PI / 180f);
+        var fwdX = MathF.Sin(rad);
+        var fwdZ = MathF.Cos(rad);
+        var dx = building.X - wp.X;
+        var dz = building.Z - wp.Z;
+        return MathF.Abs(fwdX * dz - fwdZ * dx);
+    }
+
+    private static int SelectBuildingSideCandidate(
+        IRoutingGraph graph,
+        int[] buffer,
+        int count,
+        Vec3 building)
+    {
+        if (count <= 0)
+            return -1;
+
+        if (count == 1)
+            return buffer[0];
+
+        var bestIdx = -1;
+        var bestDist = float.MaxValue;
+
+        for (var i = 0; i < count; i++)
+        {
+            var idx = buffer[i];
+            var lateral = ScoreBuildingSideLateral(graph, idx, building);
+            if (lateral <= BuildingSideMinLateralMeters)
+                continue;
+
+            var dist = graph.FlatDistance(graph.GetPosition(idx), building);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestIdx = idx;
+            }
+        }
+
+        if (bestIdx >= 0)
+            return bestIdx;
+
+        bestIdx = buffer[0];
+        bestDist = graph.FlatDistance(graph.GetPosition(bestIdx), building);
+        for (var i = 1; i < count; i++)
+        {
+            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            if (dist >= bestDist)
+                continue;
+
+            bestDist = dist;
+            bestIdx = buffer[i];
+        }
+
+        return bestIdx;
+    }
+
+    /// <summary>Drop opposite-lane end candidates; prefer curb-side lane when geometry allows.</summary>
+    private static int FilterBuildingSideEndCandidates(
+        IRoutingGraph graph,
+        int[] buffer,
+        int count,
+        Vec3 destination)
+    {
+        if (count <= 1)
+            return count;
+
+        var curbCount = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (ScoreBuildingSideLateral(graph, buffer[i], destination) > BuildingSideMinLateralMeters)
+                buffer[curbCount++] = buffer[i];
+        }
+
+        if (curbCount > 0)
+            return TrimToNearestBuildingLanes(graph, buffer, curbCount, destination);
+
+        var minDist = float.MaxValue;
+        for (var i = 0; i < count; i++)
+        {
+            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), destination);
+            if (dist < minDist)
+                minDist = dist;
+        }
+
+        var kept = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), destination);
+            if (dist > minDist + BuildingSideLaneMarginMeters)
+                continue;
+            buffer[kept++] = buffer[i];
+        }
+
+        return kept > 0 ? kept : count;
+    }
+
+    private static int FindBestBuildingSideEndNearTarget(
+        IRoutingGraph graph,
+        int fallbackEnd,
+        Vec3 arrivalTarget)
+    {
+        const float searchRadius = 90f;
+        var buffer = new int[24];
+        var count = graph.CollectNearest(arrivalTarget, searchRadius, buffer);
+        if (count == 0)
+            return ResolveBuildingSideEndWaypoint(graph, fallbackEnd, arrivalTarget);
+
+        count = graph.ExpandLaneCandidates(buffer, count, buffer.Length, default);
+        count = FilterBuildingSideEndCandidates(graph, buffer, count, arrivalTarget);
+        if (count <= 0)
+            return ResolveBuildingSideEndWaypoint(graph, fallbackEnd, arrivalTarget);
+
+        return SelectBuildingSideCandidate(graph, buffer, count, arrivalTarget);
+    }
+
+    private static int ResolveBuildingSideEndWaypoint(
+        IRoutingGraph graph,
+        int endIdx,
+        Vec3 arrivalTarget)
+    {
+        var buffer = new int[12];
+        buffer[0] = endIdx;
+        var count = graph.ExpandLaneCandidates(buffer, 1, buffer.Length, default);
+        if (count <= 1)
+            return endIdx;
+
+        return SelectBuildingSideCandidate(graph, buffer, count, arrivalTarget);
+    }
+
+    private static void ApplyBuildingSideEnd(
+        IRoutingGraph graph,
+        RouteQuery query,
+        List<int> path,
+        ref int endIdx)
+    {
+        var sideEnd = FindBestBuildingSideEndNearTarget(graph, endIdx, query.Destination);
+        if (sideEnd == endIdx || path.Count == 0)
+            return;
+
+        var anchor = path.Count >= 2 ? path[path.Count - 2] : path[0];
+        if (!TryAStar(graph, anchor, sideEnd, allowUturnAtStart: true, query, out var tail, out _) ||
+            tail.Count < 1)
+            return;
+
+        if (path[path.Count - 1] == endIdx)
+            path.RemoveAt(path.Count - 1);
+
+        var startAt = 0;
+        if (tail[0] == anchor && tail.Count > 1)
+            startAt = 1;
+        for (var i = startAt; i < tail.Count; i++)
+            path.Add(tail[i]);
+        endIdx = sideEnd;
     }
 
     private static float Clamp(float value, float min, float max) =>
