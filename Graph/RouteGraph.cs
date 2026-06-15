@@ -7,6 +7,12 @@ namespace VoogleRoute.Pathfinding.Graph;
 
 public sealed class RouteGraph : IRoutingGraph
 {
+    /// <summary>When destination Y exceeds this, nearest-waypoint search prefers matching elevation.</summary>
+    internal const float ElevationReferenceMinY = 0.1f;
+
+    /// <summary>Penalty weight for vertical mismatch vs planar distance (m²).</summary>
+    internal const float ElevationMismatchWeight = 100f;
+
     private readonly Vec3[] _positions;
     private readonly int[][] _forwardNeighbors;
     private readonly int[][] _reverseNeighbors;
@@ -116,8 +122,28 @@ public sealed class RouteGraph : IRoutingGraph
 
     public float FlatDistance(Vec3 a, Vec3 b) => Vec3.FlatLength(a, b);
 
+    public float DistanceToDestination(Vec3 position, Vec3 destination)
+    {
+        var score = NearestCandidateScore(position, destination);
+        return score <= 0f ? 0f : MathF.Sqrt(score);
+    }
+
     public float EstimateArrivalLegCost(int endIdx, Vec3 destination) =>
-        FlatDistance(_positions[endIdx], destination);
+        DistanceToDestination(_positions[endIdx], destination);
+
+    internal static bool HasElevationReference(float y) => MathF.Abs(y) > ElevationReferenceMinY;
+
+    internal static float NearestCandidateScore(Vec3 pos, Vec3 worldPos)
+    {
+        var dx = pos.X - worldPos.X;
+        var dz = pos.Z - worldPos.Z;
+        var planarSq = dx * dx + dz * dz;
+        if (!HasElevationReference(worldPos.Y))
+            return planarSq;
+
+        var dy = pos.Y - worldPos.Y;
+        return planarSq + ElevationMismatchWeight * dy * dy;
+    }
 
     public int ExpandLaneCandidates(int[] buffer, int count, int capacity, Vec3 flatForward)
     {
@@ -151,18 +177,20 @@ public sealed class RouteGraph : IRoutingGraph
     public int CollectNearest(Vec3 worldPos, float maxDistance, int[] buffer)
     {
         var maxSq = maxDistance * maxDistance;
-        var hits = new List<(int idx, float distSq)>();
+        var hits = new List<(int idx, float score)>();
         foreach (var i in _validIndices)
         {
             var pos = _positions[i];
+            var score = NearestCandidateScore(pos, worldPos);
             var dx = pos.X - worldPos.X;
             var dz = pos.Z - worldPos.Z;
-            var distSq = dx * dx + dz * dz;
-            if (distSq <= maxSq)
-                hits.Add((i, distSq));
+            if (dx * dx + dz * dz > maxSq)
+                continue;
+
+            hits.Add((i, score));
         }
 
-        hits.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+        hits.Sort((a, b) => a.score.CompareTo(b.score));
         var count = Math.Min(hits.Count, buffer.Length);
         for (var i = 0; i < count; i++)
             buffer[i] = hits[i].idx;
@@ -178,17 +206,22 @@ public sealed class RouteGraph : IRoutingGraph
     public bool TryFindNearest(Vec3 worldPos, float maxDistance, out int index)
     {
         index = -1;
-        var bestSq = float.MaxValue;
+        var bestScore = float.MaxValue;
         var maxSq = maxDistance * maxDistance;
         foreach (var i in _validIndices)
         {
             var pos = _positions[i];
             var dx = pos.X - worldPos.X;
             var dz = pos.Z - worldPos.Z;
-            var distSq = dx * dx + dz * dz;
-            if (distSq >= maxSq || distSq >= bestSq)
+            var planarSq = dx * dx + dz * dz;
+            if (planarSq > maxSq)
                 continue;
-            bestSq = distSq;
+
+            var score = NearestCandidateScore(pos, worldPos);
+            if (score >= bestScore)
+                continue;
+
+            bestScore = score;
             index = i;
         }
 

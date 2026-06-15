@@ -46,4 +46,7 @@ public interface IRoutingGraph
     float EstimateArrivalLegCost(int endIdx, Vec3 destination);
 
     float FlatDistance(Vec3 a, Vec3 b);
+
+    /// <summary>Planar distance, weighted by vertical mismatch when destination Y is meaningful.</summary>
+    float DistanceToDestination(Vec3 position, Vec3 destination);
 }

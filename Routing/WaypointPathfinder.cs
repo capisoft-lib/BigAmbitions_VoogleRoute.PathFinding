@@ -237,7 +237,7 @@ public static class WaypointPathfinder
             GraphCostMeters = graph.EstimatePathTravelCost(bestPath),
             AccessStartMeters = graph.FlatDistance(origin, graph.GetPosition(bestStart)),
             AccessEndMeters = query.PreferBuildingSideArrival
-                ? graph.FlatDistance(graph.GetPosition(bestEnd), building)
+                ? graph.DistanceToDestination(graph.GetPosition(bestEnd), building)
                 : graph.EstimateArrivalLegCost(bestEnd, destination),
             NodesExplored = explored,
             Turns = turns,
@@ -447,7 +447,7 @@ public static class WaypointPathfinder
 
         return graph.FlatDistance(origin, graph.GetPosition(startIdx)) +
                graph.EstimatePathTravelCost(path) +
-               graph.FlatDistance(graph.GetPosition(arrivalEnd), building);
+               graph.DistanceToDestination(graph.GetPosition(arrivalEnd), building);
     }
 
     private static bool ShouldPreferRoute(
@@ -633,10 +633,10 @@ public static class WaypointPathfinder
         for (var i = 0; i < limit; i++)
         {
             var best = i;
-            var bestDist = graph.FlatDistance(graph.GetPosition(buffer[i]), destination);
+            var bestDist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), destination);
             for (var j = i + 1; j < count; j++)
             {
-                var dist = graph.FlatDistance(graph.GetPosition(buffer[j]), destination);
+                var dist = graph.DistanceToDestination(graph.GetPosition(buffer[j]), destination);
                 if (dist >= bestDist)
                     continue;
                 bestDist = dist;
@@ -694,7 +694,7 @@ public static class WaypointPathfinder
         var minDist = float.MaxValue;
         for (var i = 0; i < count; i++)
         {
-            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            var dist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), building);
             if (dist < minDist)
                 minDist = dist;
         }
@@ -702,7 +702,7 @@ public static class WaypointPathfinder
         var kept = 0;
         for (var i = 0; i < count; i++)
         {
-            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            var dist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), building);
             if (dist > minDist + BuildingSideParallelLaneSeparationMeters)
                 continue;
             buffer[kept++] = buffer[i];
@@ -774,7 +774,7 @@ public static class WaypointPathfinder
             if (lateral <= BuildingSideMinLateralMeters)
                 continue;
 
-            var dist = graph.FlatDistance(graph.GetPosition(idx), building);
+            var dist = graph.DistanceToDestination(graph.GetPosition(idx), building);
             if (dist < bestDist)
             {
                 bestDist = dist;
@@ -786,10 +786,10 @@ public static class WaypointPathfinder
             return bestIdx;
 
         bestIdx = buffer[0];
-        bestDist = graph.FlatDistance(graph.GetPosition(bestIdx), building);
+        bestDist = graph.DistanceToDestination(graph.GetPosition(bestIdx), building);
         for (var i = 1; i < count; i++)
         {
-            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), building);
+            var dist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), building);
             if (dist >= bestDist)
                 continue;
 
@@ -823,7 +823,7 @@ public static class WaypointPathfinder
         var minDist = float.MaxValue;
         for (var i = 0; i < count; i++)
         {
-            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), destination);
+            var dist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), destination);
             if (dist < minDist)
                 minDist = dist;
         }
@@ -831,7 +831,7 @@ public static class WaypointPathfinder
         var kept = 0;
         for (var i = 0; i < count; i++)
         {
-            var dist = graph.FlatDistance(graph.GetPosition(buffer[i]), destination);
+            var dist = graph.DistanceToDestination(graph.GetPosition(buffer[i]), destination);
             if (dist > minDist + BuildingSideLaneMarginMeters)
                 continue;
             buffer[kept++] = buffer[i];
