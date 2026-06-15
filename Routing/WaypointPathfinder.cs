@@ -188,6 +188,7 @@ public static class WaypointPathfinder
             }
 
             endCount = graph.ExpandLaneCandidates(endBuf, endCount, endBuf.Length, default);
+            endCount = FilterStreetLevelEndCandidates(graph, endBuf, endCount, endSearch);
             endCount = TrimEndCandidates(graph, endBuf, endCount, endSearch, MaxEndCandidates);
             if (query.PreferBuildingSideArrival)
                 endCount = FilterBuildingSideEndCandidates(graph, endBuf, endCount, building);
@@ -800,6 +801,27 @@ public static class WaypointPathfinder
         return bestIdx;
     }
 
+    /// <summary>Drop bridge-deck ends when the building target is at street level (stacked roads).</summary>
+    private static int FilterStreetLevelEndCandidates(
+        IRoutingGraph graph,
+        int[] buffer,
+        int count,
+        Vec3 destination)
+    {
+        if (!RouteGraph.IsStreetLevelDestination(destination.Y))
+            return count;
+
+        var kept = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (RouteGraph.IsElevatedWaypoint(graph.GetPosition(buffer[i]).Y))
+                continue;
+            buffer[kept++] = buffer[i];
+        }
+
+        return kept > 0 ? kept : count;
+    }
+
     /// <summary>Drop opposite-lane end candidates; prefer curb-side lane when geometry allows.</summary>
     private static int FilterBuildingSideEndCandidates(
         IRoutingGraph graph,
@@ -852,6 +874,7 @@ public static class WaypointPathfinder
             return ResolveBuildingSideEndWaypoint(graph, fallbackEnd, arrivalTarget);
 
         count = graph.ExpandLaneCandidates(buffer, count, buffer.Length, default);
+        count = FilterStreetLevelEndCandidates(graph, buffer, count, arrivalTarget);
         count = FilterBuildingSideEndCandidates(graph, buffer, count, arrivalTarget);
         if (count <= 0)
             return ResolveBuildingSideEndWaypoint(graph, fallbackEnd, arrivalTarget);

@@ -10,6 +10,12 @@ public sealed class RouteGraph : IRoutingGraph
     /// <summary>When destination Y exceeds this, nearest-waypoint search prefers matching elevation.</summary>
     internal const float ElevationReferenceMinY = 0.1f;
 
+    /// <summary>Destinations at or below this are treated as street-level (building entrances ~0.01 m).</summary>
+    internal const float StreetLevelMaxY = 5f;
+
+    /// <summary>Waypoints at or above this are bridge decks / elevated cross roads.</summary>
+    internal const float BridgeDeckMinY = 8f;
+
     /// <summary>Penalty weight for vertical mismatch vs planar distance (m²).</summary>
     internal const float ElevationMismatchWeight = 100f;
 
@@ -133,12 +139,19 @@ public sealed class RouteGraph : IRoutingGraph
 
     internal static bool HasElevationReference(float y) => MathF.Abs(y) > ElevationReferenceMinY;
 
+    internal static bool IsStreetLevelDestination(float y) => y <= StreetLevelMaxY;
+
+    internal static bool IsElevatedWaypoint(float y) => y >= BridgeDeckMinY;
+
+    internal static bool ShouldWeightElevation(Vec3 worldPos) =>
+        HasElevationReference(worldPos.Y) || IsStreetLevelDestination(worldPos.Y);
+
     internal static float NearestCandidateScore(Vec3 pos, Vec3 worldPos)
     {
         var dx = pos.X - worldPos.X;
         var dz = pos.Z - worldPos.Z;
         var planarSq = dx * dx + dz * dz;
-        if (!HasElevationReference(worldPos.Y))
+        if (!ShouldWeightElevation(worldPos))
             return planarSq;
 
         var dy = pos.Y - worldPos.Y;

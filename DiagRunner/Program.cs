@@ -41,6 +41,12 @@ if (scenario == "third45_hint")
     return 0;
 }
 
+if (scenario == "eleventh21")
+{
+    RunEleventhStreet21Scenario(graph);
+    return 0;
+}
+
 if (repro == "log")
 {
     RunLogRepro(graph);
@@ -309,6 +315,55 @@ static bool TryRunThird45Case(
     Console.WriteLine("ENDROUTE");
     Console.WriteLine();
     return ok;
+}
+
+static void RunEleventhStreet21Scenario(RouteGraph graph)
+{
+    // 21 11th St under bridge — in-game defaults (preferSide off, uturn off).
+    var origin = new Vec3(-520f, 0.01f, -280f);
+    var destGround = new Vec3(-475.5f, 0.01f, -294.5f);
+    var destTest = new Vec3(-475.5f, 1.0f, -294.5f);
+    var forward = new Vec3(0f, 0f, 1f);
+
+    foreach (var (label, dest, preferSide) in new (string, Vec3, bool)[]
+    {
+        ("ingame_Y0.01_sideOff", destGround, false),
+        ("ingame_Y0.01_sideOn", destGround, true),
+        ("test_Y1.0_sideOn", destTest, true),
+        ("test_Y1.0_sideOff", destTest, false),
+    })
+    {
+        var q = new RouteQuery
+        {
+            Origin = origin,
+            Destination = dest,
+            Forward = forward,
+            HasPose = true,
+            AllowUturnAtStart = false,
+            PreferBuildingSideArrival = preferSide,
+        };
+
+        graph.TryFindNearest(dest, 200f, out var near);
+        var np = graph.GetPosition(near);
+        Console.WriteLine($"# {label} destY={dest.Y:F2} nearest={near} Y={np.Y:F2}");
+
+        if (!VehicleRoutePolyline.TryBuild(graph, q, out var built))
+        {
+            Console.WriteLine("  ROUTE FAIL");
+            continue;
+        }
+
+        var ep = graph.GetPosition(built.Route.EndWaypoint);
+        var bridgePts = built.Points.Count(p => p.Y > 8f);
+        Console.WriteLine(
+            $"  endWp={built.Route.EndWaypoint} endY={ep.Y:F2} cost={built.GraphCostMeters:F0}m " +
+            $"poly={built.Points.Count} bridgePts={bridgePts} append={built.AppendMode}");
+        Console.WriteLine(
+            $"  last=({built.Points[^1].X:F1},{built.Points[^1].Y:F1},{built.Points[^1].Z:F1})");
+        foreach (var p in built.Points)
+            Console.WriteLine($"    {p.X:F1} {p.Y:F1} {p.Z:F1}");
+        Console.WriteLine();
+    }
 }
 
 static void RunThirdStreet45HintRegression(RouteGraph graph)
