@@ -21,6 +21,9 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
     /// <summary>Building entrance height near 21 11th Street (stacked under bridge deck).</summary>
     private static readonly Vec3 EleventhStreetBuilding = new(-475.5f, 1.0f, -294.5f);
 
+    /// <summary>Building entrance height near 26 11th Street (stacked under bridge deck further north).</summary>
+    private static readonly Vec3 EleventhStreet26Building = new(-475.5f, 0.01f, -273.5f);
+
     /// <summary>In-game door/POI height from DestinationResolver (~0.01 m).</summary>
     private static readonly Vec3 EleventhStreetBuildingInGame = new(-475.5f, 0.01f, -294.5f);
 
@@ -131,6 +134,43 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
         Assert.True(_graph.GetPosition(built.Route.EndWaypoint).Y <= StreetLevelMaxY);
     }
 
+    private static readonly int[] GroundAnchorsRoad129Near26 = { 4199, 7062, 6094, 6377 };
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public void EleventhStreet26_InGameHeight_EndWaypointIsStreetLevel(bool preferBuildingSide, bool allowUturn)
+    {
+        Assert.True(
+            TryBuildRoute(EleventhStreetOrigin, NorthOnEleventh, preferBuildingSide, allowUturn,
+                EleventhStreet26Building, out var built),
+            "Route to 26 11th St (Y=0.01) from 11th St origin must succeed.");
+
+        var endPos = _graph.GetPosition(built.Route.EndWaypoint);
+        Assert.True(
+            endPos.Y <= StreetLevelMaxY,
+            $"endWp={built.Route.EndWaypoint} at Y={endPos.Y:F2} — expected street level, not bridge deck.");
+
+        var bridgePts = 0;
+        foreach (var p in built.Points)
+        {
+            if (p.Y >= BridgeDeckMinY)
+                bridgePts++;
+        }
+
+        Assert.True(
+            bridgePts == 0,
+            $"Polyline must not traverse bridge deck (found {bridgePts} elevated points).");
+
+        var last = built.Points[built.Points.Count - 1];
+        Assert.True(last.Y <= StreetLevelMaxY,
+            $"Polyline tail Y={last.Y:F2} should stay at street level.");
+
+        if (preferBuildingSide)
+            Assert.Contains(built.Route.EndWaypoint, GroundAnchorsRoad129Near26);
+    }
+
     [Fact]
     public void BridgeDeckDestination_StillEndsOnElevatedLane()
     {
@@ -179,6 +219,8 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
             HasPose = true,
             AllowUturnAtStart = allowUturn,
             PreferBuildingSideArrival = preferBuildingSide,
+            ForcedStartWaypoint = -1,
+            ForcedEndWaypoint = -1,
         };
 
         return VehicleRoutePolyline.TryBuild(_graph, query, out built);

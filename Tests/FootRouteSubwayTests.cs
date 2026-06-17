@@ -59,7 +59,7 @@ public class FootRouteSubwayTests
     }
 
     [Fact]
-    public void SubwayChosen_WhenWalkOnlyShorterThanDirect_LongTrip()
+    public void DirectChosen_WhenDirectExists_SubwayIgnoredEvenIfWalkShorter()
     {
         var board = FootTestStations.DowntownBoard;
         var exit = FootTestStations.IndustrialExit;
@@ -74,14 +74,10 @@ public class FootRouteSubwayTests
             DowntownOrigin, IndustrialTarget, DowntownOrigin, foot,
             new[] { board, exit }, Subway, options, out var result));
 
-        Assert.True(result.UsesSubway);
-        Assert.Equal(3, result.Segments.Count);
+        Assert.False(result.UsesSubway);
+        Assert.Single(result.Segments);
         Assert.Equal(FootRouteSegmentKind.Foot, result.Segments[0].Kind);
-        Assert.Equal(FootRouteSegmentKind.Subway, result.Segments[1].Kind);
-        Assert.Equal(FootRouteSegmentKind.Foot, result.Segments[2].Kind);
-        Assert.Equal("Test_Downtown", result.Subway.BoardStationName);
-        Assert.Equal("Test_Industrial", result.Subway.ExitStationName);
-        Assert.InRange(MeasureFootWalk(result), 190f, 210f);
+        Assert.InRange(MeasureFootWalk(result), 2790f, 2810f);
     }
 
     [Fact]
@@ -129,7 +125,6 @@ public class FootRouteSubwayTests
         var target = new Vec3(905f, 0f, -905f);
 
         var foot = new FakeFootPathProvider()
-            .AddLeg(origin, target, 2500f)
             .AddLeg(origin, board.NavPosition, 60f)
             .AddLeg(origin, mid.NavPosition, 350f)
             .AddLeg(mid.NavPosition, target, 400f)
@@ -216,6 +211,23 @@ public class FootRouteSubwayTests
             new[] { board, exit }, Subway, new FootRouteOptions(), out var result));
 
         Assert.False(result.UsesSubway);
+    }
+
+    [Fact]
+    public void PartialDirect_FallsBackToSubway_WhenConnectorLegsExist()
+    {
+        var board = FootTestStations.DowntownBoard;
+        var exit = FootTestStations.IndustrialExit;
+        var foot = new FakeFootPathProvider()
+            .AddLeg(DowntownOrigin, IndustrialTarget, 500f, isPartial: true)
+            .AddLeg(DowntownOrigin, board.NavPosition, 70f)
+            .AddLeg(exit.NavPosition, IndustrialTarget, 85f);
+
+        Assert.True(FootSubwayRoutePlanner.TryBuildRoute(
+            DowntownOrigin, IndustrialTarget, DowntownOrigin, foot,
+            new[] { board, exit }, Subway, new FootRouteOptions(), out var result));
+
+        Assert.True(result.UsesSubway);
     }
 
     [Fact]

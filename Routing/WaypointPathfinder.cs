@@ -124,7 +124,7 @@ public static class WaypointPathfinder
         var radius = graph.FlatDistance(origin, destination) < 55f ? 55f : DefaultSearchRadius;
 
         int startCount;
-        if (query.ForcedStartWaypoint >= 0)
+        if (query.ForcedStartWaypoint != -1)
         {
             startBuf[0] = query.ForcedStartWaypoint;
             startCount = 1;
@@ -169,7 +169,7 @@ public static class WaypointPathfinder
         }
 
         int endCount;
-        if (query.ForcedEndWaypoint >= 0)
+        if (query.ForcedEndWaypoint != -1)
         {
             endBuf[0] = query.ForcedEndWaypoint;
             endCount = 1;
@@ -819,7 +819,7 @@ public static class WaypointPathfinder
             buffer[kept++] = buffer[i];
         }
 
-        return kept > 0 ? kept : count;
+        return kept;
     }
 
     /// <summary>Drop opposite-lane end candidates; prefer curb-side lane when geometry allows.</summary>

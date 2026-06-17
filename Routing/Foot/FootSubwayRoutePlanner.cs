@@ -4,8 +4,7 @@ using VoogleRoute.Pathfinding.Geometry;
 namespace VoogleRoute.Pathfinding.Routing.Foot;
 
 /// <summary>
-/// Outdoor foot routing with optional subway when total walking in a subway route
-/// is shorter than walking the whole way.
+/// Outdoor foot routing: vanilla-complete direct walk when possible; subway only as fallback.
 /// </summary>
 public static class FootSubwayRoutePlanner
 {
@@ -21,45 +20,20 @@ public static class FootSubwayRoutePlanner
     {
         result = FootRouteResult.None;
 
-        var hasDirect = TryBuildDirect(origin, target, sampleOrigin, footPaths, options, out var direct);
-        var directWalkMeters = hasDirect ? MeasureFootMeters(direct) : float.PositiveInfinity;
-
-        if (!options.AllowSubwayPlanning)
-            return FinishDirectOnly(hasDirect, direct, out result);
-
-        var hasSubway = false;
-        var subway = FootRouteResult.None;
-        if (options.UseSubwayEnabled && stations.Count > 0)
+        if (TryBuildDirect(origin, target, sampleOrigin, footPaths, options, out var direct))
         {
-            hasSubway = TryBuildViaSubway(
-                origin, target, sampleOrigin, footPaths, stations, subwayNetwork, options, out subway);
-        }
-
-        if (hasSubway && hasDirect)
-        {
-            var subwayWalkMeters = MeasureFootMeters(subway);
-            result = subwayWalkMeters < directWalkMeters ? subway : direct;
+            result = direct;
             return true;
         }
 
-        if (hasSubway)
-        {
-            result = subway;
-            return true;
-        }
-
-        return FinishDirectOnly(hasDirect, direct, out result);
-    }
-
-    private static bool FinishDirectOnly(bool hasDirect, FootRouteResult direct, out FootRouteResult result)
-    {
-        if (!hasDirect)
-        {
-            result = FootRouteResult.None;
+        if (!options.AllowSubwayPlanning || !options.UseSubwayEnabled || stations.Count == 0)
             return false;
-        }
 
-        result = direct;
+        if (!TryBuildViaSubway(
+                origin, target, sampleOrigin, footPaths, stations, subwayNetwork, options, out var subway))
+            return false;
+
+        result = subway;
         return true;
     }
 
@@ -95,10 +69,12 @@ public static class FootSubwayRoutePlanner
     {
         result = FootRouteResult.None;
 
-        if (!footPaths.TryBuildFootLeg(origin, target, sampleOrigin, out var leg) || !leg.Success)
+        if (!footPaths.TryBuildFootLeg(
+                origin, target, sampleOrigin, FootLegPurpose.DirectToDestination, out var leg) ||
+            !leg.Success)
             return false;
 
-        if (leg.IsPartial && !options.ShowPartialPaths)
+        if (leg.IsPartial)
             return false;
 
         if (leg.Points.Count < 2)
@@ -146,7 +122,8 @@ public static class FootSubwayRoutePlanner
         for (var bi = 0; bi < boardCandidates.Count; bi++)
         {
             var board = boardCandidates[bi];
-            if (!footPaths.TryBuildFootLeg(origin, board.NavPosition, sampleOrigin, out var toBoard) ||
+            if (!footPaths.TryBuildFootLeg(
+                    origin, board.NavPosition, sampleOrigin, FootLegPurpose.Connector, out var toBoard) ||
                 !toBoard.Success ||
                 (toBoard.IsPartial && !options.ShowPartialPaths) ||
                 toBoard.Points.Count < 2)
@@ -160,7 +137,8 @@ public static class FootSubwayRoutePlanner
                 if (board.StationName == exit.StationName)
                     continue;
 
-                if (!footPaths.TryBuildFootLeg(exit.NavPosition, target, exit.NavPosition, out var fromExit) ||
+                if (!footPaths.TryBuildFootLeg(
+                        exit.NavPosition, target, exit.NavPosition, FootLegPurpose.Connector, out var fromExit) ||
                     !fromExit.Success ||
                     (fromExit.IsPartial && !options.ShowPartialPaths) ||
                     fromExit.Points.Count < 2)

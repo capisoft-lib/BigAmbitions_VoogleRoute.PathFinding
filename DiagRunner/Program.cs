@@ -47,6 +47,12 @@ if (scenario == "eleventh21")
     return 0;
 }
 
+if (scenario == "eleventh26")
+{
+    RunEleventhStreet26Scenario(graph);
+    return 0;
+}
+
 if (repro == "log")
 {
     RunLogRepro(graph);
@@ -363,6 +369,45 @@ static void RunEleventhStreet21Scenario(RouteGraph graph)
         foreach (var p in built.Points)
             Console.WriteLine($"    {p.X:F1} {p.Y:F1} {p.Z:F1}");
         Console.WriteLine();
+    }
+}
+
+static void RunEleventhStreet26Scenario(RouteGraph graph)
+{
+    var destGround = new Vec3(-475.5f, 0.01f, -273.5f);
+
+    foreach (var (label, origin, forward) in new (string, Vec3, Vec3)[]
+    {
+        ("11th_near", new Vec3(-520f, 0.01f, -280f), new Vec3(0f, 0f, 1f)),
+        ("bridge_deck", new Vec3(-475f, 16f, -296f), new Vec3(0f, 0f, 1f)),
+        ("downtown", graph.GetPosition(516), new Vec3(0f, 0f, -1f)),
+    })
+    {
+        foreach (var preferSide in new[] { false, true })
+        {
+            var q = new RouteQuery
+            {
+                Origin = origin,
+                Destination = destGround,
+                Forward = forward,
+                HasPose = true,
+                AllowUturnAtStart = false,
+                PreferBuildingSideArrival = preferSide,
+                ForcedStartWaypoint = -1,
+                ForcedEndWaypoint = -1,
+            };
+            if (!VehicleRoutePolyline.TryBuild(graph, q, out var built))
+            {
+                Console.WriteLine($"{label} preferSide={preferSide} FAIL");
+                continue;
+            }
+
+            var ep = graph.GetPosition(built.Route.EndWaypoint);
+            var bridgePts = built.Points.Count(p => p.Y > 8f);
+            Console.WriteLine(
+                $"{label} preferSide={preferSide} endWp={built.Route.EndWaypoint} endY={ep.Y:F2} " +
+                $"bridgePts={bridgePts} append={built.AppendMode}");
+        }
     }
 }
 

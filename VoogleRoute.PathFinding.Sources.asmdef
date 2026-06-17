@@ -1,0 +1,19 @@
+{
+  "name": "VoogleRoute.PathFinding.Sources",
+  "rootNamespace": "",
+  "references": [],
+  "includePlatforms": [],
+  "excludePlatforms": [
+    "Editor",
+    "WindowsStandalone64",
+    "macOSStandalone",
+    "LinuxStandalone64"
+  ],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

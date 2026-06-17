@@ -33,7 +33,12 @@ internal sealed class FakeFootPathProvider : IFootPathProvider
         return new[] { from, end };
     }
 
-    public bool TryBuildFootLeg(Vec3 origin, Vec3 target, Vec3 sampleOrigin, out FootLegResult leg)
+    public bool TryBuildFootLeg(
+        Vec3 origin,
+        Vec3 target,
+        Vec3 sampleOrigin,
+        FootLegPurpose purpose,
+        out FootLegResult leg)
     {
         for (var i = 0; i < _legs.Count; i++)
         {

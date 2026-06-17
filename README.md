@@ -39,7 +39,7 @@ dotnet test VoogleRoute.Pathfinding.sln -c Release
 
 **Vehicle:** 8 scenarios × 4 rule combos + Third & 45th goldens + 28 waypoint probes (bridge/industrial/north).
 
-**Foot (outdoor):** direct walk, subway when walk-only shorter, edge cases (partial, radius, tie).
+**Foot (outdoor):** vanilla-complete direct walk first; subway fallback when direct is unreachable; edge cases (partial, radius).
 
 **Graph:** node count, CSV edge mix, critical reachability, isolated components.
 
