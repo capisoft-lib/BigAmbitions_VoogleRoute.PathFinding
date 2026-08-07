@@ -52,6 +52,12 @@ public static class CsvRouteGraphLoader
                 roadByIndex[from] = cols[5];
                 roadByIndex[to] = cols[11];
                 AddEdge(forward, from, to);
+
+                // Native cul-de-sacs connect the road's Out waypoint directly to the
+                // opposite lane's In waypoint. The game dump records that legal turn
+                // as a base edge rather than a synthetic "uturn" maneuver.
+                if (IsNativeRoadEndTurn(cols))
+                    uturns.Add(RouteGraph.EdgeKey(from, to));
             }
             else if (edgeType == "synthetic_turn")
             {
@@ -189,6 +195,12 @@ public static class CsvRouteGraphLoader
             zs.Min(),
             zs.Max());
     }
+
+    private static bool IsNativeRoadEndTurn(string[] cols) =>
+        string.Equals(cols[5], cols[12], StringComparison.Ordinal) &&
+        !string.Equals(cols[6], cols[13], StringComparison.Ordinal) &&
+        cols[4].EndsWith("-Out", StringComparison.Ordinal) &&
+        cols[11].EndsWith("-In", StringComparison.Ordinal);
 
     private static int[][] BuildOtherLanesFromRoadProximity(
         Vec3[] positions,
