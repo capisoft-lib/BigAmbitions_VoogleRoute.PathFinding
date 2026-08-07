@@ -34,7 +34,7 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
 
     private static readonly Vec3 DowntownForward = new(0f, 0f, -1f);
 
-    private static readonly int[] GroundAnchorsRoad129 = { 6277, 8469, 9578 };
+    private static readonly int[] GroundAnchorsRoad129 = { 8383, 11372, 12875 };
 
     [Theory]
     [InlineData(true, false)]
@@ -63,7 +63,7 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
     {
         var query = new RouteQuery
         {
-            Origin = _graph.GetPosition(516),
+            Origin = _graph.GetPosition(697),
             Destination = EleventhStreetBuilding,
             HasPose = false,
             AllowUturnAtStart = true,
@@ -134,7 +134,7 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
         Assert.True(_graph.GetPosition(built.Route.EndWaypoint).Y <= StreetLevelMaxY);
     }
 
-    private static readonly int[] GroundAnchorsRoad129Near26 = { 4199, 7062, 6094, 6377 };
+    private static readonly int[] GroundAnchorsRoad129Near26 = { 5592, 9468, 8147, 8529 };
 
     [Theory]
     [InlineData(true, false)]
@@ -174,10 +174,10 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
     [Fact]
     public void BridgeDeckDestination_StillEndsOnElevatedLane()
     {
-        var bridgeDest = _graph.GetPosition(7319);
-        Assert.True(bridgeDest.Y >= BridgeDeckMinY, "fixture: wp 7319 must be bridge deck");
+        var bridgeDest = _graph.GetPosition(9809);
+        Assert.True(bridgeDest.Y >= BridgeDeckMinY, "fixture: wp 9809 must be bridge deck");
 
-        var origin = _graph.GetPosition(6847);
+        var origin = _graph.GetPosition(9179);
         var query = new RouteQuery
         {
             Origin = origin,
@@ -201,7 +201,7 @@ public class ArrivalElevationTests : IClassFixture<RouteGraphFixture>
         bool allowUturn,
         Vec3 destination,
         out VehicleRoutePolylineResult built) =>
-        TryBuildRoute(_graph.GetPosition(516), DowntownForward, preferBuildingSide, allowUturn, destination, out built);
+        TryBuildRoute(_graph.GetPosition(697), DowntownForward, preferBuildingSide, allowUturn, destination, out built);
 
     private bool TryBuildRoute(
         Vec3 origin,

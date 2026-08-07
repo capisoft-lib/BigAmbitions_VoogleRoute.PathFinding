@@ -94,6 +94,16 @@ The [Voogle Route mod](https://github.com/capisoft-lib/BigAmbitions_VoogleRoute)
 python tools/generate_enhanced_route_graph.py <waypoints_dump.csv> data/big_ambitions_enhanced_routes.csv docs/big_ambitions_enhanced_route_graph.svg
 ```
 
+When a game update reorders waypoint indices, carry forward the hand-authored
+corrections before applying the bridge/deck preprocessors:
+
+```bash
+python tools/migrate_legacy_manual_edges.py <old_enhanced.csv> <old_waypoints.csv> <new_waypoints.csv> data/big_ambitions_enhanced_routes.csv
+```
+
+See [`docs/beta1-road-refresh.md`](docs/beta1-road-refresh.md) for the complete
+BA 1.0 beta sequence, portal remaps, and verification counts.
+
 Then sync into the mod and rebuild:
 
 ```powershell

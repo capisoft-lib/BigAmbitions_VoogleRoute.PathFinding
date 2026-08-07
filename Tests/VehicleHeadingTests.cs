@@ -34,7 +34,7 @@ public class VehicleHeadingTests : IClassFixture<RouteGraphFixture>
 
         Assert.True(VehicleRoutePolyline.TryBuild(_graph, query, out var built),
             $"heading={headingDeg}° must produce a route.");
-        Assert.Equal(7242, built.Route.EndWaypoint);
+        Assert.Equal(9710, built.Route.EndWaypoint);
         AssertThirdStreetWestLane(built.Points);
     }
 

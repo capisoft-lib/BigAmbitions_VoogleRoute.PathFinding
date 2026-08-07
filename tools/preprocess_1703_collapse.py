@@ -27,8 +27,8 @@ SOURCE_TAG = "manual_bridge_1703_collapse"
 
 # lane -> (portal_a, portal_b)
 LANE_PORTALS: dict[int, tuple[int, int]] = {
-    0: (12992, 10744),  # R171 -> 1708 (industriel)
-    1: (4441, 7679),    # 1708 -> R124 (diagonale ville)
+    0: (17374, 14372),  # R171 -> 1708 (industriel)
+    1: (5921, 10312),   # 1708 -> R124 (diagonale ville)
 }
 
 

@@ -14,8 +14,8 @@ public class RoutePolylineBuilderTests : IClassFixture<RouteGraphFixture>
     [Fact]
     public void BuildPoints_ForcedWaypointRoute_HasAtLeastTwoPoints()
     {
-        var start = 516;
-        var end = 3149;
+        var start = 697;
+        var end = 4226;
         var query = new RouteQuery
         {
             Origin = _graph.GetPosition(start),

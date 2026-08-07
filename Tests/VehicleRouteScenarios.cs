@@ -18,12 +18,12 @@ public static class VehicleRouteScenarios
             Third45(),
             Third45InGame(),
             Third45WrongHint(),
-            CrossCity("downtown_industrial", graph.GetPosition(516), graph.GetPosition(3149),
-                maxCost: 5_500f, sideOnEndWp: 10382, sideOnMaxCost: 4500f),
-            CrossCity("bridge_city_industrial", graph.GetPosition(6847), graph.GetPosition(3149),
-                maxCost: 4_500f, sideOnEndWp: 10382, sideOnMaxCost: 4600f),
-            CrossCity("ne_corner_industrial", graph.GetPosition(1133), graph.GetPosition(13382),
-                maxCost: 6_500f, sideOnEndWp: 4715, sideOnMaxCost: 4900f),
+            CrossCity("downtown_industrial", graph.GetPosition(697), graph.GetPosition(4226),
+                maxCost: 5_500f, sideOnEndWp: 13907, sideOnMaxCost: 4500f),
+            CrossCity("bridge_city_industrial", graph.GetPosition(9179), graph.GetPosition(4226),
+                maxCost: 4_500f, sideOnEndWp: 13907, sideOnMaxCost: 4600f),
+            CrossCity("ne_corner_industrial", graph.GetPosition(1560), graph.GetPosition(17901),
+                maxCost: 6_500f, sideOnEndWp: 6303, sideOnMaxCost: 4900f),
             ShortUrban("4th_st_wordsmith",
                 new Vec3(134f, 0.44f, 55f),
                 new Vec3(145f, 0.41f, -8f),
@@ -49,22 +49,22 @@ public static class VehicleRouteScenarios
             {
                 ["side_off_uturn_on"] = new()
                 {
-                    EndWaypoint = 13393,
+                    EndWaypoint = 17916,
                     MaxCostMeters = 140f,
                 },
                 ["side_off_uturn_off"] = new()
                 {
-                    EndWaypoint = 13393,
+                    EndWaypoint = 17916,
                     MaxCostMeters = 700f,
                 },
                 ["side_on_uturn_on"] = new()
                 {
-                    EndWaypoint = 7242,
+                    EndWaypoint = 9710,
                     MaxCostMeters = 750f,
                 },
                 ["side_on_uturn_off"] = new()
                 {
-                    EndWaypoint = 7242,
+                    EndWaypoint = 9710,
                     MaxCostMeters = 900f,
                     MaxXOnThirdStreet = 222.5f,
                 },
@@ -85,7 +85,7 @@ public static class VehicleRouteScenarios
             {
                 ["side_on_uturn_off"] = new()
                 {
-                    EndWaypoint = 7242,
+                    EndWaypoint = 9710,
                     MaxCostMeters = 950f,
                     MaxXOnThirdStreet = 222.5f,
                 },
@@ -108,7 +108,7 @@ public static class VehicleRouteScenarios
             {
                 ["side_on_uturn_off"] = new()
                 {
-                    EndWaypoint = 7242,
+                    EndWaypoint = 9710,
                     MaxCostMeters = 950f,
                     MaxXOnThirdStreet = 222.5f,
                 },

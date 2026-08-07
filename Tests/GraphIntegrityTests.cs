@@ -17,7 +17,7 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
     [Fact]
     public void ShippedGraph_HasExpectedNodeCount()
     {
-        Assert.Equal(13398, _graph.Size);
+        Assert.Equal(17921, _graph.Size);
     }
 
     [Fact]
@@ -25,10 +25,10 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
     {
         var valid = _graph.ValidIndices;
         Assert.True(valid.Length > 1000);
-        Assert.True(ContainsWaypoint(valid, 516));
-        Assert.True(ContainsWaypoint(valid, 3149));
-        Assert.True(ContainsWaypoint(valid, 6847));
-        Assert.True(ContainsWaypoint(valid, 7242));
+        Assert.True(ContainsWaypoint(valid, 697));
+        Assert.True(ContainsWaypoint(valid, 4226));
+        Assert.True(ContainsWaypoint(valid, 9179));
+        Assert.True(ContainsWaypoint(valid, 9710));
     }
 
     private static bool ContainsWaypoint(ReadOnlySpan<int> indices, int waypoint)
@@ -77,17 +77,17 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
     [Fact]
     public void CriticalPairs_AreReachable()
     {
-        AssertReachable(516, 3149, "downtown->industrial");
-        AssertReachable(6847, 3149, "bridge city->industrial");
-        AssertReachable(1133, 13382, "NE->industrial anchor");
-        AssertReachable(529, 7446, "city 1706->deck south");
+        AssertReachable(697, 4226, "downtown->industrial");
+        AssertReachable(9179, 4226, "bridge city->industrial");
+        AssertReachable(1560, 17901, "NE->industrial anchor");
+        AssertReachable(719, 9981, "city 1706->deck south");
     }
 
     [Fact]
     public void IsolatedComponents_AreNotReachableToIndustrialZone()
     {
-        AssertNotReachable(7733, 3149, "SW pocket");
-        AssertNotReachable(4929, 3149, "NW dead-end");
+        AssertNotReachable(3949, 4226, "SW pocket");
+        AssertNotReachable(6589, 4226, "NW dead-end");
     }
 
     private void AssertReachable(int start, int end, string label)

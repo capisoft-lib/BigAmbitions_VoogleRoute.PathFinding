@@ -68,8 +68,8 @@ public class VehicleRouteFourRulesTests : IClassFixture<RouteGraphFixture>
         Assert.True(TryBuildById("third45", new VehicleRuleCombo(true, false), out var onOff));
 
         Assert.NotEqual(offOn.Route.EndWaypoint, onOff.Route.EndWaypoint);
-        Assert.Equal(13393, offOn.Route.EndWaypoint);
-        Assert.Equal(7242, onOff.Route.EndWaypoint);
+        Assert.Equal(17916, offOn.Route.EndWaypoint);
+        Assert.Equal(9710, onOff.Route.EndWaypoint);
 
         Assert.True(offOn.GraphCostMeters < onOff.GraphCostMeters,
             "U-turn at start should shorten side_off route on third45.");
@@ -94,7 +94,7 @@ public class VehicleRouteFourRulesTests : IClassFixture<RouteGraphFixture>
     public void Third45WrongHint_IgnoresEastLaneSnap()
     {
         Assert.True(TryBuildById("third45_wrong_hint", new VehicleRuleCombo(true, false), out var built));
-        Assert.Equal(7242, built.Route.EndWaypoint);
+        Assert.Equal(9710, built.Route.EndWaypoint);
         AssertThirdStreetLane("third45_wrong_hint", "side_on_uturn_off", built.Points, 222.5f, -280f, -120f);
     }
 

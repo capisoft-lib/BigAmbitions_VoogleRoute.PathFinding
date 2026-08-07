@@ -21,7 +21,7 @@ public class ArrivalHintMatrixTests : IClassFixture<RouteGraphFixture>
     public void WrongEastHint_SideOn_DoesNotForceEastLane()
     {
         Assert.True(TryBuild(true, false, true, WrongEastHint, out var built));
-        Assert.Equal(7242, built.Route.EndWaypoint);
+        Assert.Equal(9710, built.Route.EndWaypoint);
         AssertWestThirdStreet(built.Points);
     }
 
@@ -29,7 +29,7 @@ public class ArrivalHintMatrixTests : IClassFixture<RouteGraphFixture>
     public void CorrectWestHint_SideOn_KeepsWestLane()
     {
         Assert.True(TryBuild(true, false, true, CorrectWestHint, out var built));
-        Assert.Equal(7242, built.Route.EndWaypoint);
+        Assert.Equal(9710, built.Route.EndWaypoint);
         AssertWestThirdStreet(built.Points);
     }
 
@@ -37,14 +37,14 @@ public class ArrivalHintMatrixTests : IClassFixture<RouteGraphFixture>
     public void HintIgnored_WhenPreferSideOff()
     {
         Assert.True(TryBuild(false, true, true, WrongEastHint, out var built));
-        Assert.Equal(13393, built.Route.EndWaypoint);
+        Assert.Equal(17916, built.Route.EndWaypoint);
     }
 
     [Fact]
     public void NoHint_SideOn_MatchesBaseline()
     {
         Assert.True(TryBuild(true, false, false, default, out var built));
-        Assert.Equal(7242, built.Route.EndWaypoint);
+        Assert.Equal(9710, built.Route.EndWaypoint);
     }
 
     private bool TryBuild(

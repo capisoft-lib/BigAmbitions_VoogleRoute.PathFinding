@@ -38,10 +38,10 @@ ROAD_TO_LANE: dict[str, str] = {
 
 # Portails externes par couloir (extrémités hors graphe dense)
 LANE_PORTALS: dict[int, tuple[int, int]] = {
-    0: (6711, 2098),    # ville (1706) <-> ouest (1706)
-    1: (12085, 10002),  # ville (1705) <-> ouest (1705)
-    2: (9742, 946),     # ouest (1704->188) <-> ville (192->1704)
-    3: (2152, 6028),    # ouest (1703->189) <-> ville (193->1703)
+    0: (8988, 2844),    # ville (1706) <-> ouest (1706)
+    1: (16147, 13422),  # ville (1705) <-> ouest (1705)
+    2: (13094, 1303),   # ouest (1704->188) <-> ville (192->1704)
+    3: (2914, 8072),    # ouest (1703->189) <-> ville (193->1703)
 }
 
 
