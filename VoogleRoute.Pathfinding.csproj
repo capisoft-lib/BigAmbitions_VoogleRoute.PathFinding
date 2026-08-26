@@ -1,13 +1,43 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <BigAmbitionsManagedPath Condition="'$(BigAmbitionsManagedPath)' == '' and '$(BA_GAME_MANAGED_PATH)' != ''">$(BA_GAME_MANAGED_PATH)</BigAmbitionsManagedPath>
+    <TargetFrameworks>netstandard2.1</TargetFrameworks>
+    <TargetFrameworks Condition="'$(BigAmbitionsManagedPath)' != ''">netstandard2.1;net48</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <RootNamespace>VoogleRoute.Pathfinding</RootNamespace>
     <AssemblyName>VoogleRoute.Pathfinding</AssemblyName>
     <Description>Shared A* pathfinding for VoogleRoute mod and Blazor debugger.</Description>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <NoStdLib>true</NoStdLib>
+    <NoFramework>true</NoFramework>
+    <DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <DefineConstants>$(DefineConstants);BA_PLAYER_RUNTIME</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <Reference Include="mscorlib">
+      <HintPath>$(BigAmbitionsManagedPath)\mscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System">
+      <HintPath>$(BigAmbitionsManagedPath)\System.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Core">
+      <HintPath>$(BigAmbitionsManagedPath)\System.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequireBigAmbitionsPlayerRuntime" BeforeTargets="CoreCompile"
+          Condition="'$(TargetFramework)' == 'net48' and !Exists('$(BigAmbitionsManagedPath)\mscorlib.dll')">
+    <Error Text="Set BigAmbitionsManagedPath to Big Ambitions_Data\Managed when building the net48 player-runtime target." />
+  </Target>
 
   <ItemGroup>
     <Compile Remove="DiagRunner/**" />

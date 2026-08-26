@@ -1,10 +1,10 @@
 # VoogleRoute.Pathfinding
 
-Shared **netstandard2.1** routing library for [Voogle Route](https://github.com/capisoft-lib/BigAmbitions_VoogleRoute) (Unity mod) and [Voogle Route Web](https://github.com/capisoft-lib/BigAmbitions_VoogleRoute.Web).
+Shared routing library for [Voogle Route](https://github.com/capisoft-lib/BigAmbitions_VoogleRoute) (Unity mod) and [Voogle Route Web](https://github.com/capisoft-lib/BigAmbitions_VoogleRoute.Web).
 
 | Property | Value |
 |----------|-------|
-| **Target** | .NET Standard 2.1 |
+| **Targets** | .NET Standard 2.1 for tests/tools; .NET Framework 4.8 against the Big Ambitions Mono player runtime |
 | **Assembly** | `VoogleRoute.Pathfinding.dll` |
 | **Algorithm** | A* on a precomputed traffic waypoint graph |
 
@@ -29,12 +29,21 @@ dotnet build VoogleRoute.Pathfinding.csproj -c Release
 
 Output: `bin/Release/netstandard2.1/VoogleRoute.Pathfinding.dll`
 
+Build and copy the game-loadable Mono artifact (auto-detects the SDK-imported
+Steam path, runs xUnit first, and targets the game's `mscorlib`):
+
+```powershell
+.\build-pathfinding.ps1
+```
+
+Player output: `bin/Release/net48/VoogleRoute.Pathfinding.dll`
+
 ## Unit tests (vehicle routing)
 
 xUnit project under `Tests/` — vehicle and outdoor foot routing.
 
 ```powershell
-dotnet test VoogleRoute.Pathfinding.sln -c Release
+dotnet test Tests/VoogleRoute.Pathfinding.Tests.csproj -c Release
 ```
 
 **Vehicle:** 8 scenarios × 4 rule combos + Third & 45th goldens + 28 waypoint probes (bridge/industrial/north).
@@ -44,10 +53,12 @@ dotnet test VoogleRoute.Pathfinding.sln -c Release
 **Graph:** node count, CSV edge mix, critical reachability, isolated components.
 
 ```powershell
-dotnet test VoogleRoute.Pathfinding.sln -c Release
+dotnet test Tests/VoogleRoute.Pathfinding.Tests.csproj -c Release
 ```
 
-103 tests — exit code 0 required before routing changes ship.
+196 tests — exit code 0 required before routing changes ship. Targeting the
+test project avoids requesting the opt-in Mono player build without its game
+runtime path.
 
 Legacy console probes: `DiagRunner/` (`--scenario third45`, etc.).
 
