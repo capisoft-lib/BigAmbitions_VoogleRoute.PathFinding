@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using VoogleRoute.Pathfinding.Graph;
 using Xunit;
 
@@ -72,6 +73,41 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
         Assert.True(baseCount > 12000, $"base edges={baseCount}");
         Assert.True(leftCount > 300, $"left turns={leftCount}");
         Assert.True(uturnCount > 30, $"uturn connectors={uturnCount}");
+    }
+
+    [Fact]
+    public void ShippedGraph_ParallelLaneIndexMatchesApprovedFingerprint()
+    {
+        var buffer = new int[_graph.Size];
+        var nonEmptyRows = 0;
+        long directedPairs = 0;
+
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            for (var index = 0; index < _graph.Size; index++)
+            {
+                buffer[0] = index;
+                var count = _graph.ExpandLaneCandidates(buffer, 1, buffer.Length, default);
+                var laneCount = count - 1;
+
+                writer.Write(index);
+                writer.Write(laneCount);
+                if (laneCount > 0)
+                    nonEmptyRows++;
+
+                directedPairs += laneCount;
+                for (var i = 1; i < count; i++)
+                    writer.Write(buffer[i]);
+            }
+        }
+
+        var fingerprint = Convert.ToHexString(SHA256.HashData(stream.ToArray()));
+        Assert.Equal(8293, nonEmptyRows);
+        Assert.Equal(66432, directedPairs);
+        Assert.Equal(
+            "3A73462D22F34CFBCCA6DC692361DED3DBA4C6C1543404D430BB4BAD01360A8C",
+            fingerprint);
     }
 
     [Fact]

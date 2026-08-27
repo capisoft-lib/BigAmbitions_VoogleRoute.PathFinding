@@ -220,13 +220,25 @@ public static class CsvRouteGraphLoader
 
         var maxSq = ParallelLaneTurnExpander.SameRoadClusterMeters * ParallelLaneTurnExpander.SameRoadClusterMeters;
 
+        var nodesByRoad = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         foreach (var (idx, road) in roadByIndex)
         {
-            var cluster = new List<int> { idx };
-            var pos = positions[idx];
-            foreach (var (otherIdx, otherRoad) in roadByIndex)
+            if (!nodesByRoad.TryGetValue(road, out var nodes))
             {
-                if (otherIdx == idx || otherRoad != road)
+                nodes = new List<int>();
+                nodesByRoad.Add(road, nodes);
+            }
+
+            nodes.Add(idx);
+        }
+
+        foreach (var (idx, road) in roadByIndex)
+        {
+            var cluster = new List<int>();
+            var pos = positions[idx];
+            foreach (var otherIdx in nodesByRoad[road])
+            {
+                if (otherIdx == idx)
                     continue;
 
                 if (!LaneFlow.SharesTravelDirection(positions, forwardArray, idx, otherIdx))
@@ -239,15 +251,8 @@ public static class CsvRouteGraphLoader
                     cluster.Add(otherIdx);
             }
 
-            if (cluster.Count > 1)
-            {
-                var withoutSelf = cluster.Where(i => i != idx).ToArray();
-                otherLanes[idx] = withoutSelf;
-            }
-            else
-            {
-                otherLanes[idx] = Array.Empty<int>();
-            }
+            if (cluster.Count > 0)
+                otherLanes[idx] = cluster.ToArray();
         }
 
         return otherLanes;

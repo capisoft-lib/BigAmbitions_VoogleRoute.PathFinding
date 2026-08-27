@@ -11,6 +11,11 @@
     <Description>Shared A* pathfinding for VoogleRoute mod and Blazor debugger.</Description>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
     <NoStdLib>true</NoStdLib>
     <NoFramework>true</NoFramework>

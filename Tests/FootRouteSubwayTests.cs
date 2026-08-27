@@ -197,6 +197,23 @@ public class FootRouteSubwayTests
     }
 
     [Fact]
+    public void CsvSubwayStationLoader_ParsesPackagedFallback()
+    {
+        var csv = Path.Combine(AppContext.BaseDirectory, "data", "subway_stations.csv");
+        var stations = CsvSubwayStationLoader.LoadFromCsv(csv);
+
+        Assert.Equal(20, stations.Count);
+        Assert.Equal(20, stations.Select(station => station.StationName).Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(stations, station => station.StationName == "TheHamptonsStation");
+        Assert.All(stations, station =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(station.StationName));
+            Assert.NotEqual(new Vec3(0f, 0f, 0f), station.WorldPosition);
+            Assert.NotEqual(new Vec3(0f, 0f, 0f), station.NavPosition);
+        });
+    }
+
+    [Fact]
     public void DirectChosen_WhenWalkMetersEqual_SubwayNotPreferred()
     {
         var board = FootTestStations.DowntownBoard;

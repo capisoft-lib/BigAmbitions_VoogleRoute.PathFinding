@@ -29,6 +29,9 @@
     <None Include="data\test_subway_stations.csv" Link="data\test_subway_stations.csv">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\..\Data\subway_stations.csv" Link="data\subway_stations.csv">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
