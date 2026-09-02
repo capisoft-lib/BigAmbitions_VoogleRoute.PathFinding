@@ -10,6 +10,7 @@ public sealed class RouteResult
     public float GraphCostMeters { get; init; }
     public float AccessStartMeters { get; init; }
     public float AccessEndMeters { get; init; }
+    public bool UsedFallbackArrival { get; init; }
     public float TotalCostMeters => GraphCostMeters + AccessStartMeters + AccessEndMeters;
     public int NodesExplored { get; init; }
     public IReadOnlyList<PathTurn> Turns { get; init; } = Array.Empty<PathTurn>();

@@ -93,6 +93,14 @@ CORRIDOR_UTURN_ROAD_PAIRS = (
 )
 CORRIDOR_UTURN_ROADS = {road for pair in CORRIDOR_UTURN_ROAD_PAIRS for road in pair}
 PARALLEL_UTURN_MAX_DIST = 55.0
+TERMINAL_UTURN_MAX_DIST = 12.0
+TERMINAL_UTURN_MAX_HEIGHT_DELTA = 1.5
+APPROVED_TERMINAL_UTURN_WAYPOINT_PAIRS = {
+    # Road 213 east terminal: Lane 1 Out and Lane 0 In are 4.0 m apart,
+    # opposite-facing, at the same elevation. Without this hairpin, the
+    # complete Lane 0 branch around the reported Industry target has no entry.
+    (3779, 14092),
+}
 
 
 def parse_waypoints(csv_path):
@@ -444,6 +452,8 @@ def make_synthetic_turns(points, neighbors, incoming, lane_info, allowed_leftmos
                 "source": "generated_leftmost_lane_rule_user_left_only",
             })
     add_parallel_corridor_uturns(points, neighbors, exits, entries, allowed_leftmost, turns, seen)
+    add_terminal_same_road_uturns(
+        points, neighbors, exits, entries, allowed_leftmost, lane_counts, turns, seen)
     return turns
 
 
@@ -546,6 +556,74 @@ def add_parallel_corridor_uturns(points, neighbors, exits, entries, allowed_left
             "angle": angle,
             "maneuver": "uturn",
             "source": "generated_parallel_corridor_uturn",
+        })
+
+
+def add_terminal_same_road_uturns(
+        points, neighbors, exits, entries, allowed_leftmost, lane_counts, turns, seen):
+    """Connect a two-lane road's adjacent terminal Out/In pair when geometry proves a hairpin."""
+    for source in exits:
+        if lane_counts.get(source["road"], 0) != 2:
+            continue
+        if not source["name"].endswith("-Out"):
+            continue
+        if (source["road"], source["lane"]) not in allowed_leftmost:
+            continue
+
+        in_dir = source["dir"]
+        if v_len(in_dir) < 0.001:
+            continue
+
+        best = None
+        best_score = float("inf")
+        for target in entries:
+            if (source["idx"], target["idx"]) not in APPROVED_TERMINAL_UTURN_WAYPOINT_PAIRS:
+                continue
+            if target["road"] != source["road"] or target["lane"] == source["lane"]:
+                continue
+            if not target["name"].endswith("-In"):
+                continue
+            if (target["road"], target["lane"]) not in allowed_leftmost:
+                continue
+            if abs(target["y"] - source["y"]) > TERMINAL_UTURN_MAX_HEIGHT_DELTA:
+                continue
+
+            out_dir = target["dir"]
+            if v_len(out_dir) < 0.001 or dot(in_dir, out_dir) > -0.85:
+                continue
+
+            dist = math.hypot(target["x"] - source["x"], target["z"] - source["z"])
+            if dist < 2.0 or dist > TERMINAL_UTURN_MAX_DIST:
+                continue
+
+            angle = signed_angle(in_dir, out_dir)
+            abs_angle = abs(angle)
+            if abs_angle < MIN_UTURN_DEGREES or abs_angle > MAX_UTURN_DEGREES:
+                continue
+            if existing_reachable_turn(points, neighbors, source["idx"], target["idx"]):
+                continue
+
+            score = dist + abs(180.0 - abs_angle) * 0.25
+            if score < best_score:
+                best_score = score
+                best = (target, angle, dist)
+
+        if best is None:
+            continue
+
+        target, angle, dist = best
+        key = (source["idx"], target["idx"])
+        if key in seen:
+            continue
+
+        seen.add(key)
+        turns.append({
+            "from": source,
+            "to": target,
+            "control": uturn_control_point(source, target, in_dir, dist),
+            "angle": angle,
+            "maneuver": "uturn",
+            "source": "generated_terminal_same_road_uturn",
         })
 
 
@@ -779,6 +857,72 @@ def edge_row(edge_id, edge_type, maneuver, a, b, control, angle, leftmost, sourc
         "fromLaneIsLeftmostTurnLane": 1 if leftmost else 0,
         "source": source,
     }
+
+
+def merge_approved_terminal_uturns(enhanced_csv):
+    """Append only audited terminal U-turns while preserving all post-processed graph rows."""
+    points, neighbors, incoming = parse_waypoints(enhanced_csv)
+    lane_info = build_lane_info(points, neighbors)
+    allowed_leftmost = mark_leftmost_lanes(lane_info)
+    lane_counts = road_lane_counts(lane_info)
+    profiles = road_profiles(points, lane_info)
+    generated = make_synthetic_turns(
+        points, neighbors, incoming, lane_info, allowed_leftmost, lane_counts, profiles)
+    approved = [
+        turn for turn in generated
+        if turn.get("source") == "generated_terminal_same_road_uturn"
+    ]
+
+    with open(enhanced_csv, newline="", encoding="utf-8-sig") as source:
+        reader = csv.DictReader(source)
+        fields = reader.fieldnames
+        rows = list(reader)
+    if not fields:
+        raise RuntimeError(f"Missing enhanced CSV header: {enhanced_csv}")
+
+    existing = {
+        (int(row["fromIndex"]), int(row["toIndex"]), row["maneuver"])
+        for row in rows
+        if row.get("fromIndex", "").isdigit() and row.get("toIndex", "").isdigit()
+    }
+    next_edge_id = max(int(row["edgeId"]) for row in rows) + 1
+    added = 0
+    for turn in approved:
+        key = (turn["from"]["idx"], turn["to"]["idx"], turn["maneuver"])
+        if key in existing:
+            continue
+
+        a = turn["from"]
+        b = turn["to"]
+        cy = (a["y"] + b["y"]) * 0.5
+        row = edge_row(
+            next_edge_id,
+            "synthetic_turn",
+            turn["maneuver"],
+            a,
+            b,
+            (turn["control"][0], cy, turn["control"][1]),
+            turn["angle"],
+            True,
+            turn["source"],
+        )
+        rows.append({field: row.get(field, "") for field in fields})
+        existing.add(key)
+        next_edge_id += 1
+        added += 1
+
+    if added == 0:
+        print(f"No approved terminal U-turns missing from {enhanced_csv}")
+        return 0
+
+    temporary = enhanced_csv.with_suffix(enhanced_csv.suffix + ".tmp")
+    with open(temporary, "w", newline="", encoding="utf-8") as target:
+        writer = csv.DictWriter(target, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(enhanced_csv)
+    print(f"Merged {added} approved terminal U-turn(s) into {enhanced_csv}")
+    return 0
 
 
 def transform_factory(points):
@@ -1230,8 +1374,13 @@ def write_picker_html(output_html, turns, points, neighbors, lane_counts):
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--merge-approved-terminal-uturns":
+        return merge_approved_terminal_uturns(Path(sys.argv[2]))
     if len(sys.argv) != 4:
-        print("Usage: generate_enhanced_route_graph.py <waypoints.csv> <enhanced.csv> <enhanced.svg>", file=sys.stderr)
+        print(
+            "Usage: generate_enhanced_route_graph.py <waypoints.csv> <enhanced.csv> <enhanced.svg>\n"
+            "   or: generate_enhanced_route_graph.py --merge-approved-terminal-uturns <enhanced.csv>",
+            file=sys.stderr)
         return 2
     source_csv = Path(sys.argv[1])
     output_csv = Path(sys.argv[2])

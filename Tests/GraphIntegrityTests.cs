@@ -108,7 +108,7 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
         Assert.Equal(8293, nonEmptyRows);
         Assert.Equal(66432, directedPairs);
         Assert.Equal(
-            "3A73462D22F34CFBCCA6DC692361DED3DBA4C6C1543404D430BB4BAD01360A8C",
+            "9422028A56EC6C61C81C626A0AE775BC4654D3129BFCD443B42471DEEFF13A88",
             fingerprint);
     }
 
@@ -150,10 +150,12 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
     }
 
     [Fact]
-    public void IndustryCity_UnreachableLaneProbe_IsBoundedAndCancelable()
+    public void IndustryCity_Road236Fallback_IsBoundedAndCancelable()
     {
-        var query = IndustryQuery(new Vec3(-2185.557f, 0f, -1386.553f));
-        Assert.False(VehicleRoutePolyline.TryBuild(_graph, query, out _));
+        var query = IndustryQuery(_graph.GetPosition(5286));
+        Assert.True(VehicleRoutePolyline.TryBuild(_graph, query, out var first));
+        Assert.True(first.Route.UsedFallbackArrival);
+        Assert.InRange(first.Route.AccessEndMeters, 60f, 120f);
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         var timer = Stopwatch.StartNew();
@@ -165,14 +167,101 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
         }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        Console.WriteLine($"failed industry x3: {timer.ElapsedMilliseconds} ms, {allocated} bytes allocated");
-        Assert.Equal(0, successes);
+        Console.WriteLine($"fallback industry x3: {timer.ElapsedMilliseconds} ms, {allocated} bytes allocated");
+        Assert.Equal(3, successes);
         Assert.True(allocated < 6_000_000, $"Expected bounded reusable search allocations, got {allocated} bytes.");
 
         using var canceled = new CancellationTokenSource();
         canceled.Cancel();
         var canceledQuery = query with { CancellationToken = canceled.Token };
         Assert.False(VehicleRoutePolyline.TryBuild(_graph, canceledQuery, out _));
+    }
+
+    [Fact]
+    public void IndustryCity_RepairedRoad213NearestCandidates_AreReachable()
+    {
+        var destination = new Vec3(-2185.557f, 0f, -1386.553f);
+        var candidates = new int[32];
+        var count = _graph.CollectNearest(destination, 250f, candidates);
+
+        Assert.True(count >= 24, $"Expected at least 24 Industry arrival candidates, got {count}.");
+        var reachability = new bool[Math.Min(count, 24)];
+        for (var i = 0; i < reachability.Length; i++)
+        {
+            var end = candidates[i];
+            var query = IndustryQuery(destination) with { ForcedEndWaypoint = end };
+            var reachable = Routing.WaypointPathfinder.TryFindBestRoute(_graph, query, out var route);
+            reachability[i] = reachable;
+            var position = _graph.GetPosition(end);
+            var distance = _graph.FlatDistance(position, destination);
+            Console.WriteLine(
+                $"candidate={i + 1:00} wp={end} distance={distance:F2} " +
+                $"reachable={reachable} graphEnd={(reachable ? route.EndWaypoint : -1)} " +
+                $"position=({position.X:F3},{position.Y:F3},{position.Z:F3})");
+        }
+
+        Assert.True(_graph.HasForwardEdge(3779, 14092));
+        Assert.True(_graph.IsAuthorizedUturnEdge(3779, 14092));
+        var generatedRows = File.ReadLines(_csvPath)
+            .Where(line => line.Contains(",uturn,3779,Road_213-Lane_1-Out,") &&
+                           line.Contains(",14092,Road_213-Lane_0-In,") &&
+                           line.Contains(",generated_terminal_same_road_uturn,"))
+            .ToArray();
+        Assert.Single(generatedRows);
+        Assert.All(reachability.Take(6), Assert.True);
+    }
+
+    [Fact]
+    public void IndustryCity_Road213AndRoad236Targets_AreReachable()
+    {
+        var targetWaypoints = new[]
+        {
+            17894, 10479, 9922, 8884, 8163, 3703, // Road 213 lane 0
+            925, 1118, 5286, 11600, 1309, 5617,   // Road 236 lane 0
+        };
+
+        foreach (var waypoint in targetWaypoints)
+        {
+            var destination = _graph.GetPosition(waypoint);
+            var query = IndustryQuery(destination);
+            Assert.True(
+                VehicleRoutePolyline.TryBuild(_graph, query, out var built),
+                $"Expected a reachable Industry arrival for waypoint {waypoint} at {destination}.");
+            Assert.InRange(built.Route.AccessEndMeters, 0f, 120.01f);
+            Assert.InRange(built.PolylineLengthMeters, 1f, 6000f);
+        }
+    }
+
+    [Fact]
+    public void IndustryCity_RepairedRoad213SupportsHeadingAndArrivalOptions()
+    {
+        var destination = new Vec3(-2185.557f, 0f, -1386.553f);
+        var headings = new[]
+        {
+            new Vec3(0f, 0f, 1f),
+            new Vec3(1f, 0f, 0f),
+            new Vec3(0f, 0f, -1f),
+            new Vec3(-1f, 0f, 0f),
+        };
+
+        foreach (var heading in headings)
+        foreach (var allowUturn in new[] { false, true })
+        foreach (var preferBuildingSide in new[] { false, true })
+        {
+            var query = IndustryQuery(destination) with
+            {
+                Forward = heading,
+                AllowUturnAtStart = allowUturn,
+                PreferBuildingSideArrival = preferBuildingSide,
+            };
+
+            Assert.True(
+                VehicleRoutePolyline.TryBuild(_graph, query, out var built),
+                $"Road 213 route failed for heading {heading}, uturn={allowUturn}, side={preferBuildingSide}.");
+            Assert.False(built.Route.UsedFallbackArrival);
+            Assert.InRange(built.Route.AccessEndMeters, 0f, 120.01f);
+            Assert.InRange(built.PolylineLengthMeters, 1f, 6000f);
+        }
     }
 
     private static Routing.RouteQuery IndustryQuery(Vec3 destination) => new()

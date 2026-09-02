@@ -13,6 +13,11 @@ public static class WaypointPathfinder
     private const float DefaultSearchRadius = 120f;
     private const int MaxStartCandidates = 4;
     private const int MaxEndCandidates = 6;
+    private const int MaxFallbackEndCandidates = 24;
+    private const int FallbackCandidateBufferSize = 48;
+    private const float FallbackEndSearchRadius = 250f;
+    private const float FallbackEndAccessMarginMeters = 120f;
+    private const float FallbackCandidateSpacingMeters = 12f;
     private const int MaxAStarNodes = 32768;
     private const float CostTieEpsilon = 0.05f;
     private const float OppositeBearingDegrees = 105f;
@@ -123,7 +128,8 @@ public static class WaypointPathfinder
         var forward = query.Forward;
 
         var startBuf = new int[12];
-        var endBuf = new int[12];
+        var primaryEndBuf = new int[12];
+        var endBuf = new int[MaxFallbackEndCandidates];
         var radius = graph.FlatDistance(origin, destination) < 55f ? 55f : DefaultSearchRadius;
 
         int startCount;
@@ -181,27 +187,31 @@ public static class WaypointPathfinder
         {
             var endSearch = destination;
 
-            endCount = graph.CollectNearest(endSearch, radius, endBuf);
+            endCount = graph.CollectNearest(endSearch, radius, primaryEndBuf);
             if (endCount == 0)
             {
                 if (!graph.TryFindNearest(endSearch, 200f, out var fallbackEnd))
                     return false;
-                endBuf[0] = fallbackEnd;
+                primaryEndBuf[0] = fallbackEnd;
                 endCount = 1;
             }
 
-            endCount = graph.ExpandLaneCandidates(endBuf, endCount, endBuf.Length, default);
-            endCount = FilterStreetLevelEndCandidates(graph, endBuf, endCount, endSearch);
-            endCount = TrimEndCandidates(graph, endBuf, endCount, endSearch, MaxEndCandidates);
+            endCount = graph.ExpandLaneCandidates(primaryEndBuf, endCount, primaryEndBuf.Length, default);
+            endCount = FilterStreetLevelEndCandidates(graph, primaryEndBuf, endCount, endSearch);
+            endCount = TrimEndCandidates(graph, primaryEndBuf, endCount, endSearch, MaxEndCandidates);
             if (query.PreferBuildingSideArrival)
-                endCount = FilterBuildingSideEndCandidates(graph, endBuf, endCount, building);
+                endCount = FilterBuildingSideEndCandidates(graph, primaryEndBuf, endCount, building);
             if (graph.FlatDistance(origin, destination) < ShortCorridorMaxMeters)
-                endCount = EnsureShortCorridorEnd(graph, origin, destination, endBuf, endCount);
+                endCount = EnsureShortCorridorEnd(graph, origin, destination, primaryEndBuf, endCount);
+
+            Array.Copy(primaryEndBuf, endBuf, endCount);
         }
 
         if (endCount <= 0 || query.CancellationToken.IsCancellationRequested)
             return false;
 
+        var preferredEndCount = endCount;
+        var usedFallbackArrival = false;
         if (!TryFindCandidateRoute(
                 graph,
                 query,
@@ -214,7 +224,31 @@ public static class WaypointPathfinder
                 out var bestStart,
                 out var bestEnd,
                 out var explored))
-            return false;
+        {
+            if (query.ForcedEndWaypoint != -1 || query.CancellationToken.IsCancellationRequested)
+                return false;
+
+            var primaryExplored = explored;
+            endCount = AppendFallbackEndCandidates(graph, destination, endBuf, endCount);
+            if (endCount <= preferredEndCount)
+                return false;
+
+            usedFallbackArrival = true;
+            if (!TryFindCandidateRoute(
+                    graph,
+                    query,
+                    origin,
+                    startBuf,
+                    startCount,
+                    endBuf,
+                    endCount,
+                    out bestPath,
+                    out bestStart,
+                    out bestEnd,
+                    out var fallbackExplored))
+                return false;
+            explored = primaryExplored + fallbackExplored;
+        }
 
         if (bestPath == null || bestPath.Count == 0)
             return false;
@@ -233,6 +267,7 @@ public static class WaypointPathfinder
             AccessEndMeters = query.PreferBuildingSideArrival
                 ? graph.DistanceToDestination(graph.GetPosition(bestEnd), building)
                 : graph.EstimateArrivalLegCost(bestEnd, destination),
+            UsedFallbackArrival = usedFallbackArrival,
             NodesExplored = explored,
             Turns = turns,
             TurnSummary = TurnAnalyzer.Summarize(turns)
@@ -745,6 +780,78 @@ public static class WaypointPathfinder
         }
 
         buffer[count++] = idx;
+        return count;
+    }
+
+    /// <summary>
+    /// Adds more street-level arrival choices after the six legacy candidates. The search
+    /// still prefers any reachable legacy candidate; these entries are considered only when
+    /// the nearest lanes form a directed pocket. A distance margin prevents a successful
+    /// graph route from ending with an excessive straight-line access chord.
+    /// </summary>
+    private static int AppendFallbackEndCandidates(
+        IRoutingGraph graph,
+        Vec3 destination,
+        int[] buffer,
+        int count)
+    {
+        if (count <= 0 || count >= MaxFallbackEndCandidates)
+            return count;
+
+        var nearestAccess = float.MaxValue;
+        for (var i = 0; i < count; i++)
+        {
+            var access = graph.DistanceToDestination(graph.GetPosition(buffer[i]), destination);
+            if (access < nearestAccess)
+                nearestAccess = access;
+        }
+
+        var maxAccess = MathF.Min(
+            FallbackEndSearchRadius,
+            nearestAccess + FallbackEndAccessMarginMeters);
+        var candidates = new int[FallbackCandidateBufferSize];
+        var candidateCount = graph.CollectNearest(destination, FallbackEndSearchRadius, candidates);
+        candidateCount = graph.ExpandLaneCandidates(
+            candidates,
+            candidateCount,
+            candidates.Length,
+            default);
+        candidateCount = FilterStreetLevelEndCandidates(
+            graph,
+            candidates,
+            candidateCount,
+            destination);
+
+        for (var i = 0; i < candidateCount && count < MaxFallbackEndCandidates; i++)
+        {
+            var candidate = candidates[i];
+            var access = graph.DistanceToDestination(graph.GetPosition(candidate), destination);
+            if (access > maxAccess)
+                continue;
+
+            var duplicate = false;
+            for (var j = 0; j < count; j++)
+            {
+                if (buffer[j] == candidate)
+                {
+                    duplicate = true;
+                    break;
+                }
+
+                if (graph.FlatDistance(
+                        graph.GetPosition(buffer[j]),
+                        graph.GetPosition(candidate)) >= FallbackCandidateSpacingMeters ||
+                    !LaneFlow.SharesTravelDirection(graph, buffer[j], candidate))
+                    continue;
+
+                duplicate = true;
+                break;
+            }
+
+            if (!duplicate)
+                buffer[count++] = candidate;
+        }
+
         return count;
     }
 
