@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
+using VoogleRoute.Pathfinding.Geometry;
 using VoogleRoute.Pathfinding.Graph;
 using Xunit;
 
@@ -125,6 +127,65 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
         AssertNotReachable(3949, 4226, "SW pocket");
         AssertNotReachable(6589, 4226, "NW dead-end");
     }
+
+    [Fact]
+    public void IndustryCity_LongRoute_ReusesSearchWorkspace()
+    {
+        var query = IndustryQuery(new Vec3(-1740.94f, 0.41f, -1163.29f));
+        Assert.True(VehicleRoutePolyline.TryBuild(_graph, query, out _));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var timer = Stopwatch.StartNew();
+        var successes = 0;
+        for (var i = 0; i < 3; i++)
+        {
+            if (VehicleRoutePolyline.TryBuild(_graph, query, out _))
+                successes++;
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Console.WriteLine($"valid industry x3: {timer.ElapsedMilliseconds} ms, {allocated} bytes allocated");
+        Assert.Equal(3, successes);
+        Assert.True(allocated < 6_000_000, $"Expected bounded reusable search allocations, got {allocated} bytes.");
+    }
+
+    [Fact]
+    public void IndustryCity_UnreachableLaneProbe_IsBoundedAndCancelable()
+    {
+        var query = IndustryQuery(new Vec3(-2185.557f, 0f, -1386.553f));
+        Assert.False(VehicleRoutePolyline.TryBuild(_graph, query, out _));
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var timer = Stopwatch.StartNew();
+        var successes = 0;
+        for (var i = 0; i < 3; i++)
+        {
+            if (VehicleRoutePolyline.TryBuild(_graph, query, out _))
+                successes++;
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Console.WriteLine($"failed industry x3: {timer.ElapsedMilliseconds} ms, {allocated} bytes allocated");
+        Assert.Equal(0, successes);
+        Assert.True(allocated < 6_000_000, $"Expected bounded reusable search allocations, got {allocated} bytes.");
+
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        var canceledQuery = query with { CancellationToken = canceled.Token };
+        Assert.False(VehicleRoutePolyline.TryBuild(_graph, canceledQuery, out _));
+    }
+
+    private static Routing.RouteQuery IndustryQuery(Vec3 destination) => new()
+    {
+        Origin = new Vec3(131.28f, 0.44f, 121.01f),
+        Destination = destination,
+        Forward = new Vec3(0f, 0f, 1f),
+        HasPose = true,
+        ForcedStartWaypoint = -1,
+        ForcedEndWaypoint = -1,
+        AllowUturnAtStart = false,
+        PreferBuildingSideArrival = false,
+    };
 
     private void AssertReachable(int start, int end, string label)
     {

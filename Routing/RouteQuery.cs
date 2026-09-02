@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using VoogleRoute.Pathfinding.Geometry;
 
 namespace VoogleRoute.Pathfinding.Routing;
@@ -22,6 +23,9 @@ public readonly struct RouteQuery
     public bool HasArrivalRoadHint { get; init; }
 
     public Vec3 ArrivalRoadHint { get; init; }
+
+    /// <summary>Allows an obsolete background request to stop before exhausting the graph.</summary>
+    public CancellationToken CancellationToken { get; init; }
 
     public static RouteQuery FromWorldCoords(float startX, float startZ, float headingDeg, float destX, float destZ)
     {

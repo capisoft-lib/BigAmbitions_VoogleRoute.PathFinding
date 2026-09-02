@@ -21,6 +21,7 @@ public static class WaypointPathfinder
     private const float RelaxedPosePreferMarginMeters = 15f;
     private const float ShortCorridorMaxMeters = 120f;
     private const float CorridorEndSearchRadius = 50f;
+    [ThreadStatic] private static SearchWorkspace? _searchWorkspace;
 
     public static RouteResult? FindBestRoute(IRoutingGraph graph, RouteQuery query) =>
         TryFindBestRoute(graph, query, out var result) ? result : null;
@@ -76,7 +77,8 @@ public static class WaypointPathfinder
                     AllowUturnAtStart = query.AllowUturnAtStart,
                     PreferBuildingSideArrival = query.PreferBuildingSideArrival,
                     HasArrivalRoadHint = query.HasArrivalRoadHint,
-                    ArrivalRoadHint = query.ArrivalRoadHint
+                    ArrivalRoadHint = query.ArrivalRoadHint,
+                    CancellationToken = query.CancellationToken
                 },
                 out result);
         }
@@ -97,7 +99,8 @@ public static class WaypointPathfinder
                     AllowUturnAtStart = query.AllowUturnAtStart,
                     PreferBuildingSideArrival = query.PreferBuildingSideArrival,
                     HasArrivalRoadHint = query.HasArrivalRoadHint,
-                    ArrivalRoadHint = query.ArrivalRoadHint
+                    ArrivalRoadHint = query.ArrivalRoadHint,
+                    CancellationToken = query.CancellationToken
                 },
                 out var relaxed))
             return true;
@@ -196,32 +199,22 @@ public static class WaypointPathfinder
                 endCount = EnsureShortCorridorEnd(graph, origin, destination, endBuf, endCount);
         }
 
-        var bestCost = float.MaxValue;
-        List<int>? bestPath = null;
-        var bestEnd = -1;
-        var bestStart = -1;
-        var explored = 0;
+        if (endCount <= 0 || query.CancellationToken.IsCancellationRequested)
+            return false;
 
-        for (var si = 0; si < startCount; si++)
-        {
-            var startIdx = startBuf[si];
-            for (var ei = 0; ei < endCount; ei++)
-            {
-                var endIdx = endBuf[ei];
-                if (!TryAStar(graph, startIdx, endIdx, query.AllowUturnAtStart, query, out var path, out var nodeCount))
-                    continue;
-
-                explored = Math.Max(explored, nodeCount);
-                var cost = EstimateRouteCost(graph, origin, query, startIdx, endIdx, path);
-                if (!ShouldPreferRoute(cost, path, bestCost, bestPath))
-                    continue;
-
-                bestCost = cost;
-                bestPath = path;
-                bestEnd = endIdx;
-                bestStart = startIdx;
-            }
-        }
+        if (!TryFindCandidateRoute(
+                graph,
+                query,
+                origin,
+                startBuf,
+                startCount,
+                endBuf,
+                endCount,
+                out var bestPath,
+                out var bestStart,
+                out var bestEnd,
+                out var explored))
+            return false;
 
         if (bestPath == null || bestPath.Count == 0)
             return false;
@@ -245,6 +238,84 @@ public static class WaypointPathfinder
             TurnSummary = TurnAnalyzer.Summarize(turns)
         };
         return true;
+    }
+
+    /// <summary>
+    /// One reusable multi-source/multi-target A* replaces the former start×end nested searches.
+    /// Start access cost is seeded into the queue; every reachable destination candidate is
+    /// evaluated with the same final route scoring rules as before.
+    /// </summary>
+    private static bool TryFindCandidateRoute(
+        IRoutingGraph graph,
+        RouteQuery query,
+        Vec3 origin,
+        int[] starts,
+        int startCount,
+        int[] ends,
+        int endCount,
+        out List<int>? bestPath,
+        out int bestStart,
+        out int bestEnd,
+        out int explored)
+    {
+        bestPath = null;
+        bestStart = -1;
+        bestEnd = -1;
+        explored = 0;
+        var bestCost = float.MaxValue;
+        var search = GetSearchWorkspace();
+        search.BeginSearch();
+        var stateStride = startCount;
+
+        for (var i = 0; i < startCount; i++)
+        {
+            var start = starts[i];
+            var accessCost = graph.FlatDistance(origin, graph.GetPosition(start));
+            search.TryImprove(
+                EncodeCandidateState(start, i, stateStride),
+                accessCost,
+                cameFrom: -1,
+                rootStart: start,
+                accessCost + Heuristic(graph, start, ends, endCount));
+        }
+
+        while (search.TryPop(out var currentState, out var gCurrent))
+        {
+            if (query.CancellationToken.IsCancellationRequested)
+                return false;
+            if (++explored > MaxAStarNodes * stateStride)
+                return false;
+
+            var current = DecodeCandidateNode(currentState, stateStride);
+            search.Close(currentState);
+            if (TryGetEndCandidateIndex(ends, endCount, current, out _))
+            {
+                var candidate = new List<int>();
+                ReconstructCandidate(search, currentState, stateStride, candidate);
+                var start = search.GetRootStart(currentState);
+                var cost = EstimateRouteCost(graph, origin, query, start, current, candidate);
+                if (ShouldPreferRoute(cost, candidate, bestCost, bestPath))
+                {
+                    bestCost = cost;
+                    bestPath = candidate;
+                    bestStart = start;
+                    bestEnd = current;
+                }
+            }
+
+            var incomingState = search.GetCameFrom(currentState);
+            var incoming = incomingState >= 0
+                ? DecodeCandidateNode(incomingState, stateStride)
+                : -1;
+            RelaxCandidateNeighbors(
+                graph, query, currentState, current, incoming, gCurrent, ends, endCount, stateStride,
+                graph.GetForwardNeighbors(current), search);
+            RelaxCandidateNeighbors(
+                graph, query, currentState, current, incoming, gCurrent, ends, endCount, stateStride,
+                graph.GetLaneChangeNeighbors(current), search);
+        }
+
+        return bestPath != null;
     }
 
     public static int CollectNearestAligned(
@@ -317,42 +388,37 @@ public static class WaypointPathfinder
     {
         path = new List<int>();
         explored = 0;
+        var search = GetSearchWorkspace();
+        search.BeginSearch();
+        search.TryImprove(start, 0f, cameFrom: -1, rootStart: start, Heuristic(graph, start, goal));
 
-        var open = new List<int> { start };
-        var openSet = new HashSet<int> { start };
-        var cameFrom = new Dictionary<int, int>();
-        var gScore = new Dictionary<int, float> { [start] = 0f };
-        var fScore = new Dictionary<int, float> { [start] = Heuristic(graph, start, goal) };
-        var closed = new HashSet<int>();
-
-        while (open.Count > 0)
+        while (search.TryPop(out var current, out var gCurrent))
         {
+            if (query.CancellationToken.IsCancellationRequested)
+                return false;
             if (++explored > MaxAStarNodes)
                 return false;
 
-            var current = PopLowestF(open, openSet, fScore);
             if (current == goal)
             {
-                Reconstruct(cameFrom, current, path);
+                Reconstruct(search, current, path);
                 return path.Count >= 1;
             }
 
-            closed.Add(current);
-            var incoming = cameFrom.TryGetValue(current, out var prev) ? prev : -1;
-            var gCurrent = gScore.TryGetValue(current, out var gc) ? gc : float.MaxValue;
-
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
-                graph.GetForwardNeighbors(current),
-                closed, open, openSet, cameFrom, gScore, fScore);
-            RelaxNeighbors(graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
-                graph.GetLaneChangeNeighbors(current),
-                closed, open, openSet, cameFrom, gScore, fScore);
+            search.Close(current);
+            var incoming = search.GetCameFrom(current);
+            RelaxSingleGoalNeighbors(
+                graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
+                graph.GetForwardNeighbors(current), search);
+            RelaxSingleGoalNeighbors(
+                graph, current, incoming, gCurrent, goal, useGraphTravelCost, allowUturnAtStart, query,
+                graph.GetLaneChangeNeighbors(current), search);
         }
 
         return false;
     }
 
-    private static void RelaxNeighbors(
+    private static void RelaxSingleGoalNeighbors(
         IRoutingGraph graph,
         int current,
         int incoming,
@@ -362,17 +428,12 @@ public static class WaypointPathfinder
         bool allowUturnAtStart,
         RouteQuery query,
         ReadOnlySpan<int> neighbors,
-        HashSet<int> closed,
-        List<int> open,
-        HashSet<int> openSet,
-        Dictionary<int, int> cameFrom,
-        Dictionary<int, float> gScore,
-        Dictionary<int, float> fScore)
+        SearchWorkspace search)
     {
         for (var i = 0; i < neighbors.Length; i++)
         {
             var next = neighbors[i];
-            if (closed.Contains(next))
+            if (search.IsClosed(next))
                 continue;
             if (!graph.IsForwardEdgeAllowed(incoming, current, next))
                 continue;
@@ -385,48 +446,110 @@ public static class WaypointPathfinder
                 : graph.FlatDistance(graph.GetPosition(current), graph.GetPosition(next));
             step += BuildingSideTravelPenalty(graph, query, next);
             var tentative = gCurrent + step;
-            if (gScore.TryGetValue(next, out var existing) && tentative >= existing)
-                continue;
-
-            cameFrom[next] = current;
-            gScore[next] = tentative;
-            fScore[next] = tentative + Heuristic(graph, next, goal);
-            if (openSet.Add(next))
-                open.Add(next);
+            search.TryImprove(
+                next,
+                tentative,
+                current,
+                search.GetRootStart(current),
+                tentative + Heuristic(graph, next, goal));
         }
     }
 
-    private static int PopLowestF(List<int> open, HashSet<int> openSet, Dictionary<int, float> fScore)
+    private static void RelaxCandidateNeighbors(
+        IRoutingGraph graph,
+        RouteQuery query,
+        int currentState,
+        int current,
+        int incoming,
+        float gCurrent,
+        int[] goals,
+        int goalCount,
+        int stateStride,
+        ReadOnlySpan<int> neighbors,
+        SearchWorkspace search)
     {
-        var best = 0;
-        var bestF = float.MaxValue;
-        for (var i = 0; i < open.Count; i++)
+        var startSlot = currentState % stateStride;
+        for (var i = 0; i < neighbors.Length; i++)
         {
-            var idx = open[i];
-            var f = fScore.TryGetValue(idx, out var fv) ? fv : float.MaxValue;
-            var tie = MathF.Abs(f - bestF) <= 0.001f;
-            if (f < bestF - 0.001f || (tie && idx < open[best]))
-            {
-                bestF = f;
-                best = i;
-            }
-        }
+            var next = neighbors[i];
+            var nextState = EncodeCandidateState(next, startSlot, stateStride);
+            if (search.IsClosed(nextState))
+                continue;
+            if (!graph.IsForwardEdgeAllowed(incoming, current, next))
+                continue;
+            if (!query.AllowUturnAtStart && incoming < 0 &&
+                StartManeuverPolicy.IsBlockedManeuverAtStart(graph, current, next))
+                continue;
 
-        var node = open[best];
-        open.RemoveAt(best);
-        openSet.Remove(node);
-        return node;
+            var step = graph.GetForwardTravelCost(current, next, incoming) +
+                       BuildingSideTravelPenalty(graph, query, next);
+            var tentative = gCurrent + step;
+            search.TryImprove(
+                nextState,
+                tentative,
+                currentState,
+                search.GetRootStart(currentState),
+                tentative + Heuristic(graph, next, goals, goalCount));
+        }
     }
 
     private static float Heuristic(IRoutingGraph graph, int from, int to) =>
         graph.FlatDistance(graph.GetPosition(from), graph.GetPosition(to));
 
-    private static void Reconstruct(Dictionary<int, int> cameFrom, int current, List<int> path)
+    private static float Heuristic(IRoutingGraph graph, int from, int[] goals, int goalCount)
+    {
+        var best = float.MaxValue;
+        for (var i = 0; i < goalCount; i++)
+        {
+            var distance = Heuristic(graph, from, goals[i]);
+            if (distance < best)
+                best = distance;
+        }
+
+        return best;
+    }
+
+    private static bool TryGetEndCandidateIndex(int[] ends, int count, int node, out int candidateIndex)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            if (ends[i] != node)
+                continue;
+            candidateIndex = i;
+            return true;
+        }
+
+        candidateIndex = -1;
+        return false;
+    }
+
+    private static int EncodeCandidateState(int node, int startSlot, int stateStride) =>
+        checked(node * stateStride + startSlot);
+
+    private static int DecodeCandidateNode(int state, int stateStride) => state / stateStride;
+
+    private static void ReconstructCandidate(
+        SearchWorkspace search,
+        int currentState,
+        int stateStride,
+        List<int> path)
+    {
+        path.Add(DecodeCandidateNode(currentState, stateStride));
+        while (search.GetCameFrom(currentState) is var previousState && previousState >= 0)
+        {
+            currentState = previousState;
+            path.Add(DecodeCandidateNode(currentState, stateStride));
+        }
+
+        path.Reverse();
+    }
+
+    private static void Reconstruct(SearchWorkspace search, int current, List<int> path)
     {
         path.Add(current);
-        while (cameFrom.TryGetValue(current, out var prev))
+        while (search.GetCameFrom(current) is var previous && previous >= 0)
         {
-            current = prev;
+            current = previous;
             path.Add(current);
         }
 
@@ -920,6 +1043,192 @@ public static class WaypointPathfinder
         for (var i = startAt; i < tail.Count; i++)
             path.Add(tail[i]);
         endIdx = sideEnd;
+    }
+
+    private static SearchWorkspace GetSearchWorkspace() =>
+        _searchWorkspace ??= new SearchWorkspace();
+
+    /// <summary>
+    /// Per-thread reusable A* state. Generation stamps avoid clearing large arrays and the
+    /// binary min-heap permits duplicate priorities so decrease-key never scans the open set.
+    /// </summary>
+    private sealed class SearchWorkspace
+    {
+        private const float ScoreEpsilon = 0.0001f;
+        private int[] _seenStamp = Array.Empty<int>();
+        private int[] _closedStamp = Array.Empty<int>();
+        private int[] _cameFrom = Array.Empty<int>();
+        private int[] _rootStart = Array.Empty<int>();
+        private float[] _gScore = Array.Empty<float>();
+        private HeapEntry[] _heap = Array.Empty<HeapEntry>();
+        private int _generation;
+        private int _heapCount;
+
+        internal void BeginSearch()
+        {
+            if (_generation == int.MaxValue)
+            {
+                Array.Clear(_seenStamp, 0, _seenStamp.Length);
+                Array.Clear(_closedStamp, 0, _closedStamp.Length);
+                _generation = 0;
+            }
+
+            _generation++;
+            _heapCount = 0;
+        }
+
+        internal bool TryImprove(int node, float score, int cameFrom, int rootStart, float priority)
+        {
+            EnsureNodeCapacity(node);
+            if (_closedStamp[node] == _generation)
+                return false;
+            if (_seenStamp[node] == _generation && score >= _gScore[node] - ScoreEpsilon)
+                return false;
+
+            _seenStamp[node] = _generation;
+            _gScore[node] = score;
+            _cameFrom[node] = cameFrom;
+            _rootStart[node] = rootStart;
+            Push(new HeapEntry(node, priority, score));
+            return true;
+        }
+
+        internal bool TryPop(out int node, out float score)
+        {
+            while (_heapCount > 0)
+            {
+                var entry = Pop();
+                if (entry.Node < 0 || entry.Node >= _seenStamp.Length ||
+                    _seenStamp[entry.Node] != _generation ||
+                    _closedStamp[entry.Node] == _generation ||
+                    MathF.Abs(entry.Score - _gScore[entry.Node]) > ScoreEpsilon)
+                    continue;
+
+                node = entry.Node;
+                score = entry.Score;
+                return true;
+            }
+
+            node = -1;
+            score = float.MaxValue;
+            return false;
+        }
+
+        internal void Close(int node)
+        {
+            EnsureNodeCapacity(node);
+            _closedStamp[node] = _generation;
+        }
+
+        internal bool IsClosed(int node)
+        {
+            EnsureNodeCapacity(node);
+            return _closedStamp[node] == _generation;
+        }
+
+        internal int GetCameFrom(int node) =>
+            node >= 0 && node < _seenStamp.Length && _seenStamp[node] == _generation
+                ? _cameFrom[node]
+                : -1;
+
+        internal int GetRootStart(int node) =>
+            node >= 0 && node < _seenStamp.Length && _seenStamp[node] == _generation
+                ? _rootStart[node]
+                : node;
+
+        private void EnsureNodeCapacity(int node)
+        {
+            if (node < 0)
+                throw new ArgumentOutOfRangeException(nameof(node));
+            if (node < _seenStamp.Length)
+                return;
+
+            var capacity = _seenStamp.Length == 0 ? 256 : _seenStamp.Length;
+            while (capacity <= node)
+                capacity *= 2;
+
+            Array.Resize(ref _seenStamp, capacity);
+            Array.Resize(ref _closedStamp, capacity);
+            Array.Resize(ref _cameFrom, capacity);
+            Array.Resize(ref _rootStart, capacity);
+            Array.Resize(ref _gScore, capacity);
+        }
+
+        private void Push(HeapEntry entry)
+        {
+            EnsureHeapCapacity(_heapCount + 1);
+            var index = _heapCount++;
+            while (index > 0)
+            {
+                var parent = (index - 1) / 2;
+                if (!ComesBefore(entry, _heap[parent]))
+                    break;
+                _heap[index] = _heap[parent];
+                index = parent;
+            }
+
+            _heap[index] = entry;
+        }
+
+        private HeapEntry Pop()
+        {
+            var root = _heap[0];
+            var last = _heap[--_heapCount];
+            if (_heapCount == 0)
+                return root;
+
+            var index = 0;
+            while (true)
+            {
+                var left = index * 2 + 1;
+                if (left >= _heapCount)
+                    break;
+                var right = left + 1;
+                var child = right < _heapCount && ComesBefore(_heap[right], _heap[left]) ? right : left;
+                if (!ComesBefore(_heap[child], last))
+                    break;
+                _heap[index] = _heap[child];
+                index = child;
+            }
+
+            _heap[index] = last;
+            return root;
+        }
+
+        private void EnsureHeapCapacity(int required)
+        {
+            if (required <= _heap.Length)
+                return;
+            var capacity = _heap.Length == 0 ? 256 : _heap.Length * 2;
+            while (capacity < required)
+                capacity *= 2;
+            Array.Resize(ref _heap, capacity);
+        }
+
+        private static bool ComesBefore(HeapEntry left, HeapEntry right)
+        {
+            if (left.Priority < right.Priority - ScoreEpsilon)
+                return true;
+            if (left.Priority > right.Priority + ScoreEpsilon)
+                return false;
+            if (left.Node != right.Node)
+                return left.Node < right.Node;
+            return left.Score < right.Score;
+        }
+
+        private readonly struct HeapEntry
+        {
+            internal HeapEntry(int node, float priority, float score)
+            {
+                Node = node;
+                Priority = priority;
+                Score = score;
+            }
+
+            internal int Node { get; }
+            internal float Priority { get; }
+            internal float Score { get; }
+        }
     }
 
     private static float Clamp(float value, float min, float max) =>
