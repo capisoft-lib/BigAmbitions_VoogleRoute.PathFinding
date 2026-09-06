@@ -55,7 +55,8 @@ class RepairTests(unittest.TestCase):
 
     def write_rows(self, path, rows):
         with path.open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.DictWriter(stream, fieldnames=self.fields)
+            newline = "\r\n" if b"\r\n" in self.path.read_bytes() else "\n"
+            writer = csv.DictWriter(stream, fieldnames=self.fields, lineterminator=newline)
             writer.writeheader()
             writer.writerows(rows)
 
@@ -78,6 +79,16 @@ class RepairTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "identities changed"):
                 repair.repair(path)
             self.assertEqual(original, path.read_bytes())
+
+    def test_lf_and_crlf_checkouts_produce_only_the_intended_diff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "graph.csv"
+            for newline in (b"\n", b"\r\n"):
+                self.write_rows(path, self.baseline_rows())
+                path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline))
+                repair.repair(path)
+                expected = self.path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", newline)
+                self.assertEqual(expected, path.read_bytes())
 
     def test_new_terminal_exit_requires_reaudit(self):
         rows = self.baseline_rows()
