@@ -28,7 +28,6 @@ python tools/preprocess_bridge_merge.py --no-svg
 python tools/preprocess_center_deck_merge.py
 python tools/preprocess_center_deck_elevation.py --backup <pre-center-deck-backup.csv>
 python tools/preprocess_1703_collapse.py
-python tools/repair_deadend_turns.py data/big_ambitions_enhanced_routes.csv
 
 powershell -NoProfile -File tools/sync-route-data.ps1 -ModRoot "..\.."
 dotnet test Tests/VoogleRoute.Pathfinding.Tests.csproj -c Release

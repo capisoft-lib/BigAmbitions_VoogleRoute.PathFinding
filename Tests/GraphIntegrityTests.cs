@@ -105,13 +105,10 @@ public class GraphIntegrityTests : IClassFixture<RouteGraphFixture>
         }
 
         var fingerprint = Convert.ToHexString(SHA256.HashData(stream.ToArray()));
-        // Six audited terminal turns remove 14 inbound tail nodes. Comparing
-        // old/new indices confines differences to those tails and turn anchors
-        // (new junction anchors are excluded from parallel-lane candidates).
-        Assert.Equal(8283, nonEmptyRows);
-        Assert.Equal(66342, directedPairs);
+        Assert.Equal(8293, nonEmptyRows);
+        Assert.Equal(66432, directedPairs);
         Assert.Equal(
-            "ED4FE781F9737C80AD3C8D21162D35A9C89F0A04445F89E6F51DE9034A5B0CDA",
+            "9422028A56EC6C61C81C626A0AE775BC4654D3129BFCD443B42471DEEFF13A88",
             fingerprint);
     }
 
