@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 - Add six audited terminal U-turns on Roads 210, 222, 230, 233, 237 and 246; trim inbound tails so the route turns before the old terminal plane.
-- Add an idempotent, identity-checked repair pass, twelve routing regressions, seven Python checks, and a 23-point illustrated before/after audit with actual C# route polylines.
+- Add an idempotent, identity-checked repair pass, twelve routing regressions, six Python checks, and a 23-point illustrated before/after audit with actual C# route polylines.
 - The exact bridge-wall complaint and physical vehicle clearance remain unverified in game; see `docs/navigation-deadends/README.md` for unresolved locations.
 
 ## [0.11.2] - 2026-06-12

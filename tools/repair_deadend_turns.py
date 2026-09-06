@@ -115,7 +115,6 @@ def plan(rows):
 
 
 def repair(path):
-    newline = "\r\n" if path.read_bytes().split(b"\n", 1)[0].endswith(b"\r") else "\n"
     fields, rows = load(path)
     changes = plan(rows)  # Validate every repair before writing anything.
     if not changes:
@@ -129,7 +128,7 @@ def repair(path):
         result.append({field: row.get(field, "") for field in fields})
     temporary = path.with_suffix(path.suffix + ".tmp")
     with open(temporary, "w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields, lineterminator=newline)
+        writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         writer.writerows(result)
     temporary.replace(path)
