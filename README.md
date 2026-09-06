@@ -56,7 +56,7 @@ dotnet test Tests/VoogleRoute.Pathfinding.Tests.csproj -c Release
 dotnet test Tests/VoogleRoute.Pathfinding.Tests.csproj -c Release
 ```
 
-196 tests — exit code 0 required before routing changes ship. Targeting the
+215 tests — exit code 0 required before routing changes ship. Targeting the
 test project avoids requesting the opt-in Mono player build without its game
 runtime path.
 
@@ -114,6 +114,20 @@ python tools/migrate_legacy_manual_edges.py <old_enhanced.csv> <old_waypoints.cs
 
 See [`docs/beta1-road-refresh.md`](docs/beta1-road-refresh.md) for the complete
 BA 1.0 beta sequence, portal remaps, and verification counts.
+
+After the bridge preprocessors, apply the audited terminal repairs:
+
+```bash
+python tools/repair_deadend_turns.py data/big_ambitions_enhanced_routes.csv
+python -m unittest discover -s tools -p test_repair_deadend_turns.py
+```
+
+This idempotent pass verifies waypoint identities and topology before replacing
+six terminal approaches with explicit U-turns, keeping their Bezier envelopes
+behind the old terminal plane. It refuses changed game-dump identities instead
+of joining nearby streets or bridge ramps by proximity. See the
+[23-point audit and before/after route images](docs/navigation-deadends/README.md)
+for the exact scope and the places that still need in-game confirmation.
 
 Then sync into the mod and rebuild:
 

@@ -23,6 +23,11 @@ var graph = CsvRouteGraphLoader.LoadFromEnhancedCsv(csv);
 Console.WriteLine($"Graph size={graph.Size} csv={Path.GetFileName(csv)}");
 Console.WriteLine($"MaxAStarNodes=32768 (WaypointPathfinder)");
 
+if (scenario == "deadends")
+{
+    return DeadEndDiagnostics.Run(graph, GetArg(args, "--output"));
+}
+
 if (scenario == "third45")
 {
     var failed = RunThirdStreet45Scenario(graph);
